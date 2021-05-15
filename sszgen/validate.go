@@ -1,10 +1,10 @@
 package sszgen
 
 func (v *Value) validate() string {
-	switch v.t {
+	switch v.sszValueType {
 	case TypeBitList, TypeBytes:
 		cmp := "!="
-		if v.t == TypeBitList {
+		if v.sszValueType == TypeBitList {
 			cmp = ">"
 		}
 		if v.c {
@@ -18,14 +18,14 @@ func (v *Value) validate() string {
 			cmp = ">"
 		}
 
-		tmpl := `if len(::.{{.name}}) {{.cmp}} {{.size}} {
+		tmpl := `if len(::.{{.fieldName}}) {{.cmp}} {{.size}} {
 			err = ssz.ErrBytesLength
 			return
 		}
 		`
 		return execTmpl(tmpl, map[string]interface{}{
 			"cmp":  cmp,
-			"name": v.name,
+			"fieldName": v.fieldName,
 			"size": size,
 		})
 
@@ -34,24 +34,24 @@ func (v *Value) validate() string {
 			return ""
 		}
 		// We only have vectors for [][]byte roots
-		tmpl := `if len(::.{{.name}}) != {{.size}} {
+		tmpl := `if len(::.{{.fieldName}}) != {{.size}} {
 			err = ssz.ErrVectorLength
 			return
 		}
 		`
 		return execTmpl(tmpl, map[string]interface{}{
-			"name": v.name,
+			"fieldName": v.fieldName,
 			"size": v.s,
 		})
 
 	case TypeList:
-		tmpl := `if len(::.{{.name}}) > {{.size}} {
+		tmpl := `if len(::.{{.fieldName}}) > {{.size}} {
 			err = ssz.ErrListTooBig
 			return
 		}
 		`
 		return execTmpl(tmpl, map[string]interface{}{
-			"name": v.name,
+			"fieldName": v.fieldName,
 			"size": v.s,
 		})
 

@@ -23,7 +23,7 @@ func (e *env) size(name string, v *Value) string {
 
 	str := execTmpl(tmpl, map[string]interface{}{
 		"name":    name,
-		"fixed":   v.n,
+		"fixed":   v.valueSize,
 		"dynamic": v.sizeContainer("size", true),
 	})
 	return appendObjSignature(str, v)
@@ -31,10 +31,10 @@ func (e *env) size(name string, v *Value) string {
 
 func (v *Value) sizeContainer(name string, start bool) string {
 	if !start {
-		tmpl := `{{if .check}} if ::.{{.name}} == nil {
-			::.{{.name}} = new({{.obj}})
+		tmpl := `{{if .check}} if ::.{{.fieldName}} == nil {
+			::.{{.fieldName}} = new({{.structName}})
 		}
-		{{end}} {{ .dst }} += ::.{{.name}}.SizeSSZ()`
+		{{end}} {{ .dst }} += ::.{{.fieldName}}.SizeSSZ()`
 
 		check := true
 		if v.isListElem() {
@@ -44,35 +44,35 @@ func (v *Value) sizeContainer(name string, start bool) string {
 			check = false
 		}
 		return execTmpl(tmpl, map[string]interface{}{
-			"name":  v.name,
+			"fieldName":  v.fieldName,
 			"dst":   name,
-			"obj":   v.objRef(),
+			"structName":   v.objRef(),
 			"check": check,
 		})
 	}
 	out := []string{}
 	for indx, v := range v.o {
 		if !v.isFixed() {
-			out = append(out, fmt.Sprintf("// Field (%d) '%s'\n%s", indx, v.name, v.size(name)))
+			out = append(out, fmt.Sprintf("// Field (%d) '%s'\n%s", indx, v.fieldName, v.size(name)))
 		}
 	}
 	return strings.Join(out, "\n\n")
 }
 
-// 'name' is the name of target variable we assign the size too. We also use this function
+// 'fieldName' is the fieldName of target variable we assign the size too. We also use this function
 // during marshalling to figure out the size of the offset
 func (v *Value) size(name string) string {
 	if v.isFixed() {
-		if v.t == TypeContainer {
+		if v.sszValueType == TypeContainer {
 			return v.sizeContainer(name, false)
 		}
-		if v.n == 1 {
+		if v.valueSize == 1 {
 			return name + "++"
 		}
-		return name + " += " + strconv.Itoa(int(v.n))
+		return name + " += " + strconv.Itoa(int(v.valueSize))
 	}
 
-	switch v.t {
+	switch v.sszValueType {
 	case TypeContainer, TypeReference:
 		return v.sizeContainer(name, false)
 
@@ -80,27 +80,27 @@ func (v *Value) size(name string) string {
 		fallthrough
 
 	case TypeBytes:
-		return fmt.Sprintf(name+" += len(::.%s)", v.name)
+		return fmt.Sprintf(name+" += len(::.%s)", v.fieldName)
 
 	case TypeList:
 		fallthrough
 
 	case TypeVector:
 		if v.e.isFixed() {
-			return fmt.Sprintf("%s += len(::.%s) * %d", name, v.name, v.e.n)
+			return fmt.Sprintf("%s += len(::.%s) * %d", name, v.fieldName, v.e.valueSize)
 		}
-		v.e.name = v.name + "[ii]"
-		tmpl := `for ii := 0; ii < len(::.{{.name}}); ii++ {
+		v.e.fieldName = v.fieldName + "[ii]"
+		tmpl := `for ii := 0; ii < len(::.{{.fieldName}}); ii++ {
 			{{.size}} += 4
 			{{.dynamic}}
 		}`
 		return execTmpl(tmpl, map[string]interface{}{
-			"name":    v.name,
+			"fieldName":    v.fieldName,
 			"size":    name,
 			"dynamic": v.e.size(name),
 		})
 
 	default:
-		panic(fmt.Errorf("size not implemented for type %s", v.t.String()))
+		panic(fmt.Errorf("size not implemented for type %s", v.sszValueType.String()))
 	}
 }

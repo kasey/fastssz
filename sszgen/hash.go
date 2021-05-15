@@ -12,7 +12,7 @@ func (e *env) hashTreeRoot(name string, v *Value) string {
 		return ssz.HashWithDefaultHasher(::)
 	}
 	
-	// HashTreeRootWith ssz hashes the {{.name}} object with a hasher	
+	// HashTreeRootWith ssz hashes the {{.name}} object with a hasher
 	func (:: *{{.name}}) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 		{{.hashTreeRoot}}
 		return
@@ -55,11 +55,11 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 
 	var merkleize string
 	if isList {
-		tmpl := `numItems := uint64(len(::.{{.name}}))
+		tmpl := `numItems := uint64(len(::.{{.fieldName}}))
 		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit({{.listSize}}, numItems, {{.elemSize}}))`
 
 		merkleize = execTmpl(tmpl, map[string]interface{}{
-			"name":     v.name,
+			"fieldName":     v.fieldName,
 			"listSize": v.s,
 			"elemSize": elemSize,
 		})
@@ -74,7 +74,7 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 
 	tmpl := `{
 		{{.outer}}subIndx := hh.Index()
-		for _, i := range ::.{{.name}} {
+		for _, i := range ::.{{.fieldName}} {
 			{{.inner}}hh.{{.appendFn}}({{.subName}})
 		}
 		{{.merkleize}}
@@ -82,7 +82,7 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 	return execTmpl(tmpl, map[string]interface{}{
 		"outer":     v.validate(),
 		"inner":     inner,
-		"name":      v.name,
+		"fieldName":      v.fieldName,
 		"subName":   subName,
 		"appendFn":  appendFn,
 		"merkleize": merkleize,
@@ -90,92 +90,92 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 }
 
 func (v *Value) hashTreeRoot() string {
-	switch v.t {
+	switch v.sszValueType {
 	case TypeContainer, TypeReference:
 		return v.hashTreeRootContainer(false)
 
 	case TypeBytes:
 		// There are only fixed []byte
-		name := v.name
+		name := v.fieldName
 		if v.c {
 			name += "[:]"
 		}
 
-		tmpl := `{{.validate}}hh.PutBytes(::.{{.name}})`
+		tmpl := `{{.validate}}hh.PutBytes(::.{{.fieldName}})`
 		return execTmpl(tmpl, map[string]interface{}{
 			"validate": v.validate(),
-			"name":     name,
+			"fieldName":     name,
 			"size":     v.s,
 		})
 
 	case TypeUint:
 		var name string
-		if v.ref != "" || v.obj != "" {
+		if v.ref != "" || v.structName != "" {
 			// alias to Uint64
-			name = fmt.Sprintf("uint64(::.%s)", v.name)
+			name = fmt.Sprintf("uint64(::.%s)", v.fieldName)
 		} else {
-			name = "::." + v.name
+			name = "::." + v.fieldName
 		}
-		bitLen := v.n * 8
+		bitLen := v.valueSize * 8
 		return fmt.Sprintf("hh.PutUint%d(%s)", bitLen, name)
 
 	case TypeBitList:
-		tmpl := `if len(::.{{.name}}) == 0 {
+		tmpl := `if len(::.{{.fieldName}}) == 0 {
 			err = ssz.ErrEmptyBitlist
 			return
 		}
-		hh.PutBitlist(::.{{.name}}, {{.size}})
+		hh.PutBitlist(::.{{.fieldName}}, {{.size}})
 		`
 		return execTmpl(tmpl, map[string]interface{}{
-			"name": v.name,
+			"fieldName": v.fieldName,
 			"size": v.m,
 		})
 
 	case TypeBool:
-		return fmt.Sprintf("hh.PutBool(::.%s)", v.name)
+		return fmt.Sprintf("hh.PutBool(::.%s)", v.fieldName)
 
 	case TypeVector:
-		return v.hashRoots(false, v.e.t)
+		return v.hashRoots(false, v.e.sszValueType)
 
 	case TypeList:
 		if v.e.isFixed() {
-			if v.e.t == TypeUint || v.e.t == TypeBytes {
+			if v.e.sszValueType == TypeUint || v.e.sszValueType == TypeBytes {
 				// return hashBasicSlice(v)
-				return v.hashRoots(true, v.e.t)
+				return v.hashRoots(true, v.e.sszValueType)
 			}
 		}
 		tmpl := `{
 			subIndx := hh.Index()
-			num := uint64(len(::.{{.name}}))
+			num := uint64(len(::.{{.fieldName}}))
 			if num > {{.num}} {
 				err = ssz.ErrIncorrectListSize
 				return
 			}
 			for i := uint64(0); i < num; i++ {
-				if err = ::.{{.name}}[i].HashTreeRootWith(hh); err != nil {
+				if err = ::.{{.fieldName}}[i].HashTreeRootWith(hh); err != nil {
 					return
 				}
 			}
 			hh.MerkleizeWithMixin(subIndx, num, {{.num}})
 		}`
 		return execTmpl(tmpl, map[string]interface{}{
-			"name": v.name,
+			"fieldName": v.fieldName,
 			"num":  v.m,
 		})
 
 	default:
-		panic(fmt.Errorf("hash not implemented for type %s", v.t.String()))
+		panic(fmt.Errorf("hash not implemented for type %s", v.sszValueType.String()))
 	}
 }
 
 func (v *Value) hashTreeRootContainer(start bool) string {
 	if !start {
-		return fmt.Sprintf("if err = ::.%s.HashTreeRootWith(hh); err != nil {\n return\n}", v.name)
+		return fmt.Sprintf("if err = ::.%s.HashTreeRootWith(hh); err != nil {\n return\n}", v.fieldName)
 	}
 
 	out := []string{}
 	for indx, i := range v.o {
-		str := fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.name, i.hashTreeRoot())
+		str := fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.fieldName, i.hashTreeRoot())
 		out = append(out, str)
 	}
 

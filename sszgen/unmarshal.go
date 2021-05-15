@@ -25,13 +25,13 @@ func (e *env) unmarshal(name string, v *Value) string {
 
 func (v *Value) unmarshal(dst string) string {
 	// we use dst as the input buffer where the SSZ data to decode the value is.
-	switch v.t {
+	switch v.sszValueType {
 	case TypeContainer, TypeReference:
 		return v.umarshalContainer(false, dst)
 
 	case TypeBytes:
 		if v.c {
-			return fmt.Sprintf("copy(::.%s[:], %s)", v.name, dst)
+			return fmt.Sprintf("copy(::.%s[:], %s)", v.fieldName, dst)
 		}
 		validate := ""
 		if v.s == 0 {
@@ -39,13 +39,13 @@ func (v *Value) unmarshal(dst string) string {
 			validate = fmt.Sprintf("if len(%s) > %d { return ssz.ErrBytesLength }\n", dst, v.m)
 		}
 		// both fixed and dynamic are decoded equally
-		tmpl := `{{.validate}}if cap(::.{{.name}}) == 0 {
-			::.{{.name}} = make([]byte, 0, len({{.dst}}))
+		tmpl := `{{.validate}}if cap(::.{{.fieldName}}) == 0 {
+			::.{{.fieldName}} = make([]byte, 0, len({{.dst}}))
 		}
-		::.{{.name}} = append(::.{{.name}}, {{.dst}}...)`
+		::.{{.fieldName}} = append(::.{{.fieldName}}, {{.dst}}...)`
 		return execTmpl(tmpl, map[string]interface{}{
 			"validate": validate,
-			"name":     v.name,
+			"fieldName":     v.fieldName,
 			"dst":      dst,
 			"size":     v.m,
 		})
@@ -53,31 +53,31 @@ func (v *Value) unmarshal(dst string) string {
 	case TypeUint:
 		if v.ref != "" {
 			// alias, we need to cast the value
-			return fmt.Sprintf("::.%s = %s.%s(ssz.Unmarshall%s(%s))", v.name, v.ref, v.obj, uintVToName(v), dst)
+			return fmt.Sprintf("::.%s = %s.%s(ssz.Unmarshall%s(%s))", v.fieldName, v.ref, v.structName, uintVToName(v), dst)
 		}
-		if v.obj != "" {
+		if v.structName != "" {
 			// alias to a type on the same package
-			return fmt.Sprintf("::.%s = %s(ssz.Unmarshall%s(%s))", v.name, v.obj, uintVToName(v), dst)
+			return fmt.Sprintf("::.%s = %s(ssz.Unmarshall%s(%s))", v.fieldName, v.structName, uintVToName(v), dst)
 		}
-		return fmt.Sprintf("::.%s = ssz.Unmarshall%s(%s)", v.name, uintVToName(v), dst)
+		return fmt.Sprintf("::.%s = ssz.Unmarshall%s(%s)", v.fieldName, uintVToName(v), dst)
 
 	case TypeBitList:
 		tmpl := `if err = ssz.ValidateBitlist({{.dst}}, {{.size}}); err != nil {
 			return err
 		}
-		if cap(::.{{.name}}) == 0 {
-			::.{{.name}} = make([]byte, 0, len({{.dst}}))
+		if cap(::.{{.fieldName}}) == 0 {
+			::.{{.fieldName}} = make([]byte, 0, len({{.dst}}))
 		}
-		::.{{.name}} = append(::.{{.name}}, {{.dst}}...)`
+		::.{{.fieldName}} = append(::.{{.fieldName}}, {{.dst}}...)`
 		return execTmpl(tmpl, map[string]interface{}{
-			"name": v.name,
+			"fieldName": v.fieldName,
 			"dst":  dst,
 			"size": v.m,
 		})
 
 	case TypeVector:
 		if v.e.isFixed() {
-			dst = fmt.Sprintf("%s[ii*%d: (ii+1)*%d]", dst, v.e.n, v.e.n)
+			dst = fmt.Sprintf("%s[ii*%d: (ii+1)*%d]", dst, v.e.valueSize, v.e.valueSize)
 
 			tmpl := `{{.create}}
 			for ii := 0; ii < {{.size}}; ii++ {
@@ -95,10 +95,10 @@ func (v *Value) unmarshal(dst string) string {
 		return v.unmarshalList()
 
 	case TypeBool:
-		return fmt.Sprintf("::.%s = ssz.UnmarshalBool(%s)", v.name, dst)
+		return fmt.Sprintf("::.%s = ssz.UnmarshalBool(%s)", v.fieldName, dst)
 
 	default:
-		panic(fmt.Errorf("unmarshal not implemented for type %d", v.t))
+		panic(fmt.Errorf("unmarshal not implemented for type %d", v.sszValueType))
 	}
 }
 
@@ -111,7 +111,7 @@ func (v *Value) unmarshalList() string {
 	v.s = 0
 
 	if v.e.isFixed() {
-		dst := fmt.Sprintf("buf[ii*%d: (ii+1)*%d]", v.e.n, v.e.n)
+		dst := fmt.Sprintf("buf[ii*%d: (ii+1)*%d]", v.e.valueSize, v.e.valueSize)
 
 		tmpl := `num, err := ssz.DivideInt2(len(buf), {{.size}}, {{.max}})
 		if err != nil {
@@ -122,14 +122,14 @@ func (v *Value) unmarshalList() string {
 			{{.unmarshal}}
 		}`
 		return execTmpl(tmpl, map[string]interface{}{
-			"size":      v.e.n,
+			"size":      v.e.valueSize,
 			"max":       maxSize,
 			"create":    v.createSlice(),
 			"unmarshal": v.e.unmarshal(dst),
 		})
 	}
 
-	if v.t == TypeVector {
+	if v.sszValueType == TypeVector {
 		panic("it cannot happen")
 	}
 
@@ -149,7 +149,7 @@ func (v *Value) unmarshalList() string {
 		return err
 	}`
 
-	v.e.name = v.name + "[indx]"
+	v.e.fieldName = v.fieldName + "[indx]"
 
 	data := map[string]interface{}{
 		"size":      maxSize,
@@ -161,10 +161,10 @@ func (v *Value) unmarshalList() string {
 
 func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 	if !start {
-		tmpl := `{{ if .check }}if ::.{{.name}} == nil {
-			::.{{.name}} = new({{.obj}})
+		tmpl := `{{ if .check }}if ::.{{.fieldName}} == nil {
+			::.{{.fieldName}} = new({{.structName}})
 		}
-		{{ end }}if err = ::.{{.name}}.UnmarshalSSZ({{.dst}}); err != nil {
+		{{ end }}if err = ::.{{.fieldName}}.UnmarshalSSZ({{.dst}}); err != nil {
 			return err
 		}`
 		check := true
@@ -172,8 +172,8 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 			check = false
 		}
 		return execTmpl(tmpl, map[string]interface{}{
-			"name":  v.name,
-			"obj":   v.objRef(),
+			"fieldName":  v.fieldName,
+			"structName":   v.objRef(),
 			"dst":   dst,
 			"check": check,
 		})
@@ -217,7 +217,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 
 	str += execTmpl(tmpl, map[string]interface{}{
 		"cmp":     cmp,
-		"size":    v.n,
+		"size":    v.valueSize,
 		"offsets": strings.Join(offsets, ", "),
 	})
 
@@ -231,7 +231,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 		// How much it increases on every item
 		var incr uint64
 		if i.isFixed() {
-			incr = i.n
+			incr = i.valueSize
 		} else {
 			incr = 4
 		}
@@ -241,7 +241,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 
 		var res string
 		if i.isFixed() {
-			res = fmt.Sprintf("// Field (%d) '%s'\n%s\n\n", indx, i.name, i.unmarshal(dst))
+			res = fmt.Sprintf("// Field (%d) '%s'\n%s\n\n", indx, i.fieldName, i.unmarshal(dst))
 
 		} else {
 			// read the offset
@@ -249,7 +249,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 
 			data := map[string]interface{}{
 				"indx":   indx,
-				"name":   i.name,
+				"fieldName":   i.fieldName,
 				"offset": offset,
 				"dst":    dst,
 			}
@@ -264,7 +264,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 				data["more"] = ""
 			}
 
-			tmpl := `// Offset ({{.indx}}) '{{.name}}'
+			tmpl := `// Offset ({{.indx}}) '{{.fieldName}}'
 			if {{.offset}} = ssz.ReadOffset({{.dst}}); {{.offset}} > size {{.more}} {
 				return ssz.ErrOffset
 			}
@@ -288,14 +288,14 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 				to = offsets[c+1]
 			}
 
-			tmpl := `// Field ({{.indx}}) '{{.name}}'
+			tmpl := `// Field ({{.indx}}) '{{.fieldName}}'
 			{
 				buf = tail[{{.from}}:{{.to}}]
 				{{.unmarshal}}
 			}`
 			res := execTmpl(tmpl, map[string]interface{}{
 				"indx":      indx,
-				"name":      i.name,
+				"fieldName":      i.fieldName,
 				"from":      from,
 				"to":        to,
 				"unmarshal": i.unmarshal("buf"),
@@ -311,7 +311,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 
 // createItem is used to initialize slices of objects
 func (v *Value) createSlice() string {
-	if v.t != TypeVector && v.t != TypeList {
+	if v.sszValueType != TypeVector && v.sszValueType != TypeList {
 		panic("BUG: create item is only intended to be used with vectors and lists")
 	}
 
@@ -324,14 +324,14 @@ func (v *Value) createSlice() string {
 		size = strconv.Itoa(int(v.s))
 	}
 
-	switch v.e.t {
+	switch v.e.sszValueType {
 	case TypeUint:
 		// []int uses the Extend functions in the fastssz package
-		return fmt.Sprintf("::.%s = ssz.Extend%s(::.%s, %s)", v.name, uintVToName(v.e), v.name, size)
+		return fmt.Sprintf("::.%s = ssz.Extend%s(::.%s, %s)", v.fieldName, uintVToName(v.e), v.fieldName, size)
 
 	case TypeContainer:
 		// []*(ref.)Struct{}
-		return fmt.Sprintf("::.%s = make([]*%s, %s)", v.name, v.e.objRef(), size)
+		return fmt.Sprintf("::.%s = make([]*%s, %s)", v.fieldName, v.e.objRef(), size)
 
 	case TypeBytes:
 		// [][]byte
@@ -339,11 +339,11 @@ func (v *Value) createSlice() string {
 			return ""
 		}
 		if v.e.c {
-			return fmt.Sprintf("::.%s = make([][%d]byte, %s)", v.name, v.e.s, size)
+			return fmt.Sprintf("::.%s = make([][%d]byte, %s)", v.fieldName, v.e.s, size)
 		}
-		return fmt.Sprintf("::.%s = make([][]byte, %s)", v.name, size)
+		return fmt.Sprintf("::.%s = make([][]byte, %s)", v.fieldName, size)
 
 	default:
-		panic(fmt.Sprintf("create not implemented for type %s", v.e.t.String()))
+		panic(fmt.Sprintf("create not implemented for type %s", v.e.sszValueType.String()))
 	}
 }

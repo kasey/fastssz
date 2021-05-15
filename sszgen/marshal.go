@@ -9,12 +9,12 @@ import (
 // 1. MarshalTo(dst []byte) marshals the content to the target array.
 // 2. Marshal() marshals the content to a newly created array.
 func (e *env) marshal(name string, v *Value) string {
-	tmpl := `// MarshalSSZ ssz marshals the {{.name}} object
+	tmpl := `// MarshalSSZ ssz marshals the {{.fieldName}} object
 	func (:: *{{.name}}) MarshalSSZ() ([]byte, error) {
 		return ssz.MarshalSSZ(::)
 	}
 
-	// MarshalSSZTo ssz marshals the {{.name}} object to a target array	
+	// MarshalSSZTo ssz marshals the {{.name}} object to a target array
 	func (:: *{{.name}}) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		dst = buf
 		{{.offset}}
@@ -29,44 +29,44 @@ func (e *env) marshal(name string, v *Value) string {
 	}
 	if !v.isFixed() {
 		// offset is the position where the offset starts
-		data["offset"] = fmt.Sprintf("offset := int(%d)\n", v.n)
+		data["offset"] = fmt.Sprintf("offset := int(%d)\n", v.valueSize)
 	}
 	str := execTmpl(tmpl, data)
 	return appendObjSignature(str, v)
 }
 
 func (v *Value) marshal() string {
-	switch v.t {
+	switch v.sszValueType {
 	case TypeContainer, TypeReference:
 		return v.marshalContainer(false)
 
 	case TypeBytes:
-		name := v.name
+		name := v.fieldName
 		if v.c {
 			name += "[:]"
 		}
-		tmpl := `{{.validate}}dst = append(dst, ::.{{.name}}...)`
+		tmpl := `{{.validate}}dst = append(dst, ::.{{.fieldName}}...)`
 
 		return execTmpl(tmpl, map[string]interface{}{
 			"validate": v.validate(),
-			"name":     name,
+			"fieldName":     name,
 		})
 
 	case TypeUint:
 		var name string
-		if v.ref != "" || v.obj != "" {
+		if v.ref != "" || v.structName != "" {
 			// alias to Uint64
-			name = fmt.Sprintf("uint64(::.%s)", v.name)
+			name = fmt.Sprintf("uint64(::.%s)", v.fieldName)
 		} else {
-			name = "::." + v.name
+			name = "::." + v.fieldName
 		}
 		return fmt.Sprintf("dst = ssz.Marshal%s(dst, %s)", uintVToName(v), name)
 
 	case TypeBitList:
-		return fmt.Sprintf("%sdst = append(dst, ::.%s...)", v.validate(), v.name)
+		return fmt.Sprintf("%sdst = append(dst, ::.%s...)", v.validate(), v.fieldName)
 
 	case TypeBool:
-		return fmt.Sprintf("dst = ssz.MarshalBool(dst, ::.%s)", v.name)
+		return fmt.Sprintf("dst = ssz.MarshalBool(dst, ::.%s)", v.fieldName)
 
 	case TypeVector:
 		if v.e.isFixed() {
@@ -78,22 +78,22 @@ func (v *Value) marshal() string {
 		return v.marshalList()
 
 	default:
-		panic(fmt.Errorf("marshal not implemented for type %s", v.t.String()))
+		panic(fmt.Errorf("marshal not implemented for type %s", v.sszValueType.String()))
 	}
 }
 
 func (v *Value) marshalList() string {
-	v.e.name = v.name + "[ii]"
+	v.e.fieldName = v.fieldName + "[ii]"
 
 	// bound check
 	str := v.validate()
 
 	if v.e.isFixed() {
-		tmpl := `for ii := 0; ii < len(::.{{.name}}); ii++ {
+		tmpl := `for ii := 0; ii < len(::.{{.fieldName}}); ii++ {
 			{{.dynamic}}
 		}`
 		str += execTmpl(tmpl, map[string]interface{}{
-			"name":    v.name,
+			"fieldName":    v.fieldName,
 			"dynamic": v.e.marshal(),
 		})
 		return str
@@ -104,18 +104,18 @@ func (v *Value) marshalList() string {
 	// 2. marshal each element
 
 	tmpl := `{
-		offset = 4 * len(::.{{.name}})
-		for ii := 0; ii < len(::.{{.name}}); ii++ {
+		offset = 4 * len(::.{{.fieldName}})
+		for ii := 0; ii < len(::.{{.fieldName}}); ii++ {
 			dst = ssz.WriteOffset(dst, offset)
 			{{.size}}
 		}
 	}
-	for ii := 0; ii < len(::.{{.name}}); ii++ {
+	for ii := 0; ii < len(::.{{.fieldName}}); ii++ {
 		{{.marshal}}
 	}`
 
 	str += execTmpl(tmpl, map[string]interface{}{
-		"name":    v.name,
+		"fieldName":    v.fieldName,
 		"size":    v.e.size("offset"),
 		"marshal": v.e.marshal(),
 	})
@@ -123,14 +123,14 @@ func (v *Value) marshalList() string {
 }
 
 func (v *Value) marshalVector() (str string) {
-	v.e.name = fmt.Sprintf("%s[ii]", v.name)
+	v.e.fieldName = fmt.Sprintf("%s[ii]", v.fieldName)
 
 	tmpl := `{{.validate}}for ii := 0; ii < {{.size}}; ii++ {
 		{{.marshal}}
 	}`
 	return execTmpl(tmpl, map[string]interface{}{
 		"validate": v.validate(),
-		"name":     v.name,
+		"fieldName":     v.fieldName,
 		"size":     v.s,
 		"marshal":  v.e.marshal(),
 	})
@@ -138,10 +138,10 @@ func (v *Value) marshalVector() (str string) {
 
 func (v *Value) marshalContainer(start bool) string {
 	if !start {
-		tmpl := `{{ if .check }}if ::.{{.name}} == nil {
-			::.{{.name}} = new({{.obj}})
+		tmpl := `{{ if .check }}if ::.{{.fieldName}} == nil {
+			::.{{.fieldName}} = new({{.structName}})
 		}
-		{{ end }}if dst, err = ::.{{.name}}.MarshalSSZTo(dst); err != nil {
+		{{ end }}if dst, err = ::.{{.fieldName}}.MarshalSSZTo(dst); err != nil {
 			return
 		}`
 		// validate only for fixed structs
@@ -153,24 +153,24 @@ func (v *Value) marshalContainer(start bool) string {
 			check = false
 		}
 		return execTmpl(tmpl, map[string]interface{}{
-			"name":  v.name,
-			"obj":   v.objRef(),
+			"fieldName":  v.fieldName,
+			"structName":   v.objRef(),
 			"check": check,
 		})
 	}
 
-	offset := v.n
+	offset := v.valueSize
 	out := []string{}
 
 	for indx, i := range v.o {
 		var str string
 		if i.isFixed() {
 			// write the content
-			str = fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.name, i.marshal())
+			str = fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.fieldName, i.marshal())
 		} else {
 			// write the offset
-			str = fmt.Sprintf("// Offset (%d) '%s'\ndst = ssz.WriteOffset(dst, offset)\n%s\n", indx, i.name, i.size("offset"))
-			offset += i.n
+			str = fmt.Sprintf("// Offset (%d) '%s'\ndst = ssz.WriteOffset(dst, offset)\n%s\n", indx, i.fieldName, i.size("offset"))
+			offset += i.valueSize
 		}
 		out = append(out, str)
 	}
@@ -178,7 +178,7 @@ func (v *Value) marshalContainer(start bool) string {
 	// write the dynamic parts
 	for indx, i := range v.o {
 		if !i.isFixed() {
-			out = append(out, fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.name, i.marshal()))
+			out = append(out, fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.fieldName, i.marshal()))
 		}
 	}
 	return strings.Join(out, "\n")

@@ -35,20 +35,20 @@ func (v *Value) getTrees(isList bool, elem Type) string {
 	}
 
 	var merkleize string
-	subLeavesTmpl := `subLeaves := ssz.LeavesFromUint64(::.{{.name}})`
+	subLeavesTmpl := `subLeaves := ssz.LeavesFromUint64(::.{{.fieldName}})`
 	subLeaves := execTmpl(subLeavesTmpl, map[string]interface{}{
-		"name": v.name,
+		"fieldName": v.fieldName,
 	})
 
 	if isList {
-		tmpl := `numItems := len(::.{{.name}})
+		tmpl := `numItems := len(::.{{.fieldName}})
 		tmp, err = ssz.TreeFromNodesWithMixin(subLeaves, numItems, int(ssz.CalculateLimit({{.listSize}}, uint64(numItems), {{.elemSize}})))
 		if err != nil {
 			return nil, err
 		}`
 
 		merkleize = execTmpl(tmpl, map[string]interface{}{
-			"name":     v.name,
+			"fieldName":     v.fieldName,
 			"listSize": v.s,
 			"elemSize": 8,
 		})
@@ -67,86 +67,86 @@ func (v *Value) getTrees(isList bool, elem Type) string {
 }
 
 func (v *Value) getTree() string {
-	switch v.t {
+	switch v.sszValueType {
 	case TypeContainer, TypeReference:
 		return v.getTreeContainer(false)
 
 	case TypeBytes:
 		// There are only fixed []byte
-		name := v.name
+		name := v.fieldName
 		if v.c {
 			name += "[:]"
 		}
 
-		tmpl := `{{.validate}}w.AddBytes(::.{{.name}})`
+		tmpl := `{{.validate}}w.AddBytes(::.{{.fieldName}})`
 		return execTmpl(tmpl, map[string]interface{}{
 			"validate": v.validate(),
-			"name":     name,
+			"fieldName":     name,
 			"size":     v.s,
 		})
 
 	case TypeUint:
 		var name string
-		if v.ref != "" || v.obj != "" {
+		if v.ref != "" || v.structName != "" {
 			// alias to Uint64
-			name = fmt.Sprintf("uint64(::.%s)", v.name)
+			name = fmt.Sprintf("uint64(::.%s)", v.fieldName)
 		} else {
-			name = "::." + v.name
+			name = "::." + v.fieldName
 		}
 
-		bitLen := v.n * 8
+		bitLen := v.valueSize * 8
 		return fmt.Sprintf("w.AddUint%d(%s)", bitLen, name)
 
 	case TypeBitList:
 		panic("unimplemented")
 
 	case TypeBool:
-		return fmt.Sprintf("tmp = ssz.LeafFromBool(::.%s)", v.name)
+		return fmt.Sprintf("tmp = ssz.LeafFromBool(::.%s)", v.fieldName)
 
 	case TypeVector:
-		return v.getTrees(false, v.e.t)
+		return v.getTrees(false, v.e.sszValueType)
 
 	case TypeList:
 		if v.e.isFixed() {
-			if v.e.t == TypeUint || v.e.t == TypeBytes {
-				return v.getTrees(true, v.e.t)
+			if v.e.sszValueType == TypeUint || v.e.sszValueType == TypeBytes {
+				return v.getTrees(true, v.e.sszValueType)
 			}
 		}
 		tmpl := `{
 			subIdx := w.Indx()
-			num := len(::.{{.name}})
+			num := len(::.{{.fieldName}})
 			if num > {{.num}} {
 				err = ssz.ErrIncorrectListSize
 				return err
 			}
 			for i := 0; i < num; i++ {
-				n, err := ::.{{.name}}[i].GetTree()
+				valueSize, err := ::.{{.fieldName}}[i].GetTree()
 				if err != nil {
 					return err
 				}
-				w.AddNode(n)
+				w.AddNode(valueSize)
 			}
 			w.CommitWithMixin(subIdx, num, {{.num}})
 		}`
 		return execTmpl(tmpl, map[string]interface{}{
-			"name": v.name,
+			"fieldName": v.fieldName,
 			"num":  v.m,
 		})
 
 	default:
-		panic(fmt.Errorf("hash not implemented for type %s", v.t.String()))
+		panic(fmt.Errorf("hash not implemented for type %s", v.sszValueType.String()))
 	}
 }
 
 func (v *Value) getTreeContainer(start bool) string {
 	if !start {
-		return fmt.Sprintf("if err := ::.%s.GetTreeWithWrapper(w); err != nil {\n return err\n}", v.name)
+		return fmt.Sprintf("if err := ::.%s.GetTreeWithWrapper(w); err != nil {\n return err\n}", v.fieldName)
 	}
 
 	numLeaves := nextPowerOfTwo(uint64(len(v.o)))
 	out := []string{}
 	for indx, i := range v.o {
-		str := fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.name, i.getTree())
+		str := fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.fieldName, i.getTree())
 		out = append(out, str)
 	}
 
