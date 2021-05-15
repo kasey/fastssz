@@ -1,17 +1,18 @@
-package main
+package sszgen
 
 import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"flag"
 	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -22,93 +23,52 @@ import (
 
 const bytesPerLengthOffset = 4
 
-func main() {
-	var source string
-	var objsStr string
-	var output string
-	var include string
-	var experimental bool
-
-	flag.StringVar(&source, "path", "", "")
-	flag.StringVar(&objsStr, "objs", "", "")
-	flag.StringVar(&output, "output", "", "")
-	flag.StringVar(&include, "include", "", "")
-	flag.BoolVar(&experimental, "experimental", false, "")
-
-	flag.Parse()
-
-	targets := decodeList(objsStr)
-	includeList := decodeList(include)
-
-	if err := encode(source, targets, output, includeList, experimental); err != nil {
-		fmt.Printf("[ERR]: %v", err)
-	}
-}
-
-func decodeList(input string) []string {
-	if input == "" {
-		return []string{}
-	}
-	return strings.Split(strings.TrimSpace(input), ",")
-}
-
 // The SSZ code generation works in three steps:
 // 1. Parse the Go input with the go/parser library to generate an AST representation.
 // 2. Convert the AST into an Internal Representation (IR) to describe the structs and fields
 // using the Value object.
 // 3. Use the IR to print the encoding functions
 
-func encode(source string, targets []string, output string, includePaths []string, experimental bool) error {
-	files, err := parseInput(source) // 1.
+func Generate(sourcePath string, dependencyPaths []string, sszTypeNames []string, outputFilename string) error {
+	sourcePackage, err := parsePackage(sourcePath) // 1.
 	if err != nil {
 		return err
 	}
 
-	// parse all the include paths as well
-	include := map[string]*ast.File{}
-	for _, i := range includePaths {
-		files, err := parseInput(i)
+	referencePackages:= make(map[string]*ast.Package)
+	for _, i := range dependencyPaths {
+		pkg, err := parsePackage(i)
 		if err != nil {
 			return err
 		}
-		for k, v := range files {
-			include[k] = v
-		}
-	}
-
-	// read package
-	var packName string
-	for _, file := range files {
-		packName = file.Name.Name
+		referencePackages[pkg.Name] = pkg
 	}
 
 	e := &env{
-		include:  include,
-		source:   source,
-		files:    files,
-		objs:     map[string]*Value{},
-		packName: packName,
-		targets:  targets,
+		referencePackages: referencePackages,
+		sourcePackage: sourcePackage,
+		objs:         map[string]*Value{},
+		sszTypeNames: sszTypeNames,
 	}
 
 	if err := e.generateIR(); err != nil { // 2.
 		return err
 	}
 
-	// 3.
 	var out map[string]string
-	if output == "" {
-		out, err = e.generateEncodings(experimental)
+	if outputFilename == "" {
+		out, err = e.generateEncodings()
 	} else {
 		// output to a specific path
-		out, err = e.generateOutputEncodings(output, experimental)
+		out, err = e.generateOutputEncodings(outputFilename)
 	}
 	if err != nil {
-		panic(err)
+		return err
 	}
+	// TODO: push this check up a layer into the output generation
 	if out == nil {
 		// empty output
-		panic("No files to generate")
+		return fmt.Errorf("No files to generate")
 	}
 
 	for name, str := range out {
@@ -125,41 +85,61 @@ func encode(source string, targets []string, output string, includePaths []strin
 	return nil
 }
 
-func isDir(path string) (bool, error) {
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		return false, err
+func filterSkipTests(f fs.FileInfo) bool {
+	if strings.HasSuffix(f.Name(), "_test.go") {
+		return false
 	}
-	return fileInfo.IsDir(), nil
+	return true
 }
 
-func parseInput(source string) (map[string]*ast.File, error) {
-	files := map[string]*ast.File{}
+func exactMatchFilter(filename string) func(fs.FileInfo) bool {
+	return func(f fs.FileInfo) bool {
+		return f.Name() == filename
+	}
+}
 
-	ok, err := isDir(source)
+func parsePackage(filePath string) (*ast.Package, error) {
+	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return nil, err
 	}
-	if ok {
-		// dir
-		astFiles, err := parser.ParseDir(token.NewFileSet(), source, nil, parser.AllErrors)
-		if err != nil {
-			return nil, err
+
+	var filt func(fs.FileInfo) bool
+	if fileInfo.IsDir() {
+		filt = filterSkipTests
+	} else {
+		filePath = path.Dir(filePath)
+		filt = exactMatchFilter(filePath)
+	}
+	pkgs, err := parser.ParseDir(token.NewFileSet(), filePath, filt, parser.AllErrors)
+
+	// there are only 2 special cases where go allows multiple packages to exist in the same directory
+	// 1) A test package can be named <OtherPackageName>_test
+	// 2) As long as build tags ignore the package or prevent multiple packages from building in
+	// the same pass, the conflicting packages will get filtered out before the compiler cares.
+	// for some reason grpc/proto generates placeholder files with `package ignore`
+	// and the ignore build tag. The following loop filters out both of these cases so we can pick a single
+	// package for each directory up front.
+	for k, p := range pkgs {
+		if _, ok := pkgs[k + "_test"]; ok {
+			delete(pkgs, k)
 		}
-		for _, v := range astFiles {
-			if !strings.HasSuffix(v.Name, "_test") {
-				files = v.Files
+		for fname, f := range p.Files {
+			if len(f.Comments) == 0 && len(f.Decls) == 0 && f.Doc == nil && len(f.Imports) == 0 && f.Scope.Outer == nil && len(f.Scope.Objects) == 0 && len(f.Unresolved) == 0 {
+				delete(p.Files, fname)
 			}
 		}
-	} else {
-		// single file
-		astfile, err := parser.ParseFile(token.NewFileSet(), source, nil, parser.AllErrors)
-		if err != nil {
-			return nil, err
+		if len(p.Files) == 0 {
+			delete(pkgs, k)
 		}
-		files[source] = astfile
 	}
-	return files, nil
+	if len(pkgs) == 1 {
+		for _, v := range pkgs {
+			// return the first (and only) thing in the map
+			return v, err
+		}
+	}
+	return nil, fmt.Errorf("sszgen only understands source directories with exactly one package (not counting _test and ignored), %s contains %d", filePath, len(pkgs))
 }
 
 // Value is a type that represents a Go field or struct and his
@@ -266,28 +246,29 @@ func (t Type) String() string {
 }
 
 type env struct {
-	source string
-	// map of the include path for cross package reference
-	include map[string]*ast.File
-	// map of files with their Go AST format
-	files map[string]*ast.File
-	// name of the package
-	packName string
 	// map of structs with their Go AST format
 	raw map[string]*astStruct
 	// map of structs with their IR format
 	objs map[string]*Value
 	// map of files with their structs in order
 	order map[string][]string
-	// target structures to encode
-	targets []string
+	// target structures to generate ssz methodsets
+	sszTypeNames []string
 	// imports in all the parsed packages
 	imports []*astImport
+	// sourcePackages replaces 'files', storing
+	// parsed source code containing code generation
+	// targets at package granularity
+	sourcePackage *ast.Package
+	// referencePackages replaces 'include'
+	// these are packages that do not contain sszTypes we want to do
+	// code generation for, but do contain types that we need to reference
+	referencePackages map[string]*ast.Package
 }
 
 const encodingPrefix = "_encoding.go"
 
-func (e *env) generateOutputEncodings(output string, experimental bool) (map[string]string, error) {
+func (e *env) generateOutputEncodings(output string) (map[string]string, error) {
 	out := map[string]string{}
 
 	keys := make([]string, 0, len(e.order))
@@ -301,7 +282,7 @@ func (e *env) generateOutputEncodings(output string, experimental bool) (map[str
 		orders = append(orders, e.order[k]...)
 	}
 
-	res, ok, err := e.print(true, orders, experimental)
+	res, ok, err := e.print(true, orders)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +293,7 @@ func (e *env) generateOutputEncodings(output string, experimental bool) (map[str
 	return out, nil
 }
 
-func (e *env) generateEncodings(experimental bool) (map[string]string, error) {
+func (e *env) generateEncodings() (map[string]string, error) {
 	outs := map[string]string{}
 
 	firstDone := true
@@ -322,7 +303,7 @@ func (e *env) generateEncodings(experimental bool) (map[string]string, error) {
 		name = strings.TrimSuffix(name, ext)
 		name += encodingPrefix
 
-		vvv, ok, err := e.print(firstDone, order, experimental)
+		vvv, ok, err := e.print(firstDone, order)
 		if err != nil {
 			return nil, err
 		}
@@ -336,7 +317,7 @@ func (e *env) generateEncodings(experimental bool) (map[string]string, error) {
 
 func (e *env) hashSource() (string, error) {
 	content := ""
-	for _, f := range e.files {
+	for _, f := range e.sourcePackage.Files {
 		var buf bytes.Buffer
 		if err := format.Node(&buf, token.NewFileSet(), f); err != nil {
 			return "", err
@@ -348,7 +329,7 @@ func (e *env) hashSource() (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
-func (e *env) print(first bool, order []string, experimental bool) (string, bool, error) {
+func (e *env) print(first bool, order []string) (string, bool, error) {
 	hash, err := e.hashSource()
 	if err != nil {
 		return "", false, fmt.Errorf("failed to hash files: %v", err)
@@ -374,7 +355,7 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 	`
 
 	data := map[string]interface{}{
-		"package": e.packName,
+		"package": e.sourcePackage.Name,
 		"hash":    hash,
 	}
 
@@ -403,9 +384,6 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 			continue
 		}
 		getTree := ""
-		if experimental {
-			getTree = e.getTree(name, obj)
-		}
 		objs = append(objs, &Obj{
 			HashTreeRoot: e.hashTreeRoot(name, obj),
 			GetTree:      getTree,
@@ -561,6 +539,10 @@ func decodeASTStruct(file *ast.File) *astResult {
 	return res
 }
 
+// when an ast.FuncDecl name matches one of the generated functions known
+// by isFuncDecl, it uses isSpecificFunc to compare the signature of the found
+// function with a string representation of the expected function signature
+// to determine if it found a function generated in a previous run of ssz-gen
 func isSpecificFunc(funcDecl *ast.FuncDecl, in, out []string) bool {
 	check := func(types *ast.FieldList, args []string) bool {
 		list := types.List
@@ -704,7 +686,7 @@ func (e *env) generateIR() error {
 	}
 
 	// decode all the imports from the input files
-	for _, file := range e.files {
+	for _, file := range e.sourcePackage.Files {
 		if err := addImports(decodeASTImports(file)); err != nil {
 			return err
 		}
@@ -713,7 +695,7 @@ func (e *env) generateIR() error {
 	astResults := []*astResult{}
 
 	// decode the structs from the input path
-	for name, file := range e.files {
+	for name, file := range e.sourcePackage.Files {
 		res := decodeASTStruct(file)
 		if err := addStructs(res, false); err != nil {
 			return err
@@ -733,13 +715,15 @@ func (e *env) generateIR() error {
 	// decode the structs from the include path but ONLY include them on 'raw' not in 'order'.
 	// If the structs are in raw they can be used as a reference at compilation time and since they are
 	// not in 'order' they cannot be used to marshal/unmarshal encodings
-	for _, file := range e.include {
-		res := decodeASTStruct(file)
-		if err := addStructs(res, true); err != nil {
-			return err
-		}
+	for _, pkg := range e.referencePackages {
+		for _, file := range pkg.Files {
+			res := decodeASTStruct(file)
+			if err := addStructs(res, true); err != nil {
+				return err
+			}
 
-		astResults = append(astResults, res)
+			astResults = append(astResults, res)
+		}
 	}
 
 	for _, res := range astResults {
@@ -750,10 +734,10 @@ func (e *env) generateIR() error {
 
 	for name, obj := range e.raw {
 		var valid bool
-		if e.targets == nil || len(e.targets) == 0 {
+		if e.sszTypeNames == nil || len(e.sszTypeNames) == 0 {
 			valid = true
 		} else {
-			valid = contains(name, e.targets)
+			valid = contains(name, e.sszTypeNames)
 		}
 		if valid {
 			if obj.isRef {

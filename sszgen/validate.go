@@ -1,4 +1,4 @@
-package main
+package sszgen
 
 func (v *Value) validate() string {
 	switch v.t {
