@@ -9,7 +9,7 @@ import (
 // 1. MarshalTo(dst []byte) marshals the content to the target array.
 // 2. Marshal() marshals the content to a newly created array.
 func (e *env) marshal(name string, v *Value) string {
-	tmpl := `// MarshalSSZ ssz marshals the {{.fieldName}} object
+	tmpl := `// MarshalSSZ ssz marshals the {{.name}} object
 	func (:: *{{.name}}) MarshalSSZ() ([]byte, error) {
 		return ssz.MarshalSSZ(::)
 	}
@@ -60,7 +60,7 @@ func (v *Value) marshal() string {
 		} else {
 			name = "::." + v.fieldName
 		}
-		return fmt.Sprintf("dst = ssz.Marshal%s(dst, %s)", uintVToName(v), name)
+		return fmt.Sprintf("dst = ssz.Marshal%s(dst, %s)", v.uintVToName(), name)
 
 	case TypeBitList:
 		return fmt.Sprintf("%sdst = append(dst, ::.%s...)", v.validate(), v.fieldName)

@@ -53,13 +53,13 @@ func (v *Value) unmarshal(dst string) string {
 	case TypeUint:
 		if v.ref != "" {
 			// alias, we need to cast the value
-			return fmt.Sprintf("::.%s = %s.%s(ssz.Unmarshall%s(%s))", v.fieldName, v.ref, v.structName, uintVToName(v), dst)
+			return fmt.Sprintf("::.%s = %s.%s(ssz.Unmarshall%s(%s))", v.fieldName, v.ref, v.structName, v.uintVToName(), dst)
 		}
 		if v.structName != "" {
 			// alias to a type on the same package
-			return fmt.Sprintf("::.%s = %s(ssz.Unmarshall%s(%s))", v.fieldName, v.structName, uintVToName(v), dst)
+			return fmt.Sprintf("::.%s = %s(ssz.Unmarshall%s(%s))", v.fieldName, v.structName, v.uintVToName(), dst)
 		}
-		return fmt.Sprintf("::.%s = ssz.Unmarshall%s(%s)", v.fieldName, uintVToName(v), dst)
+		return fmt.Sprintf("::.%s = ssz.Unmarshall%s(%s)", v.fieldName, v.uintVToName(), dst)
 
 	case TypeBitList:
 		tmpl := `if err = ssz.ValidateBitlist({{.dst}}, {{.size}}); err != nil {
@@ -327,7 +327,7 @@ func (v *Value) createSlice() string {
 	switch v.e.sszValueType {
 	case TypeUint:
 		// []int uses the Extend functions in the fastssz package
-		return fmt.Sprintf("::.%s = ssz.Extend%s(::.%s, %s)", v.fieldName, uintVToName(v.e), v.fieldName, size)
+		return fmt.Sprintf("::.%s = ssz.Extend%s(::.%s, %s)", v.fieldName, v.e.uintVToName(), v.fieldName, size)
 
 	case TypeContainer:
 		// []*(ref.)Struct{}
