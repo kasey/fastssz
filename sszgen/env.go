@@ -1,7 +1,9 @@
 package sszgen
 
 import (
+	"fmt"
 	"go/ast"
+	"path/filepath"
 )
 
 func NewEnv(sourcePackage *ast.Package, referencePackages map[string]*ast.Package, sszTypeNames []string) *env {
@@ -72,6 +74,25 @@ type env struct {
 	// these are packages that do not contain sszTypes we want to do
 	// code generation for, but do contain types that we need to reference
 	referencePackages map[string]*ast.Package
+}
+
+type astImport struct {
+	alias string
+	path  string
+}
+
+func (a *astImport) getFullName() string {
+	if a.alias != "" {
+		return fmt.Sprintf("%s \"%s\"", a.alias, a.path)
+	}
+	return fmt.Sprintf("\"%s\"", a.path)
+}
+
+func (a *astImport) match(name string) bool {
+	if a.alias != "" {
+		return a.alias == name
+	}
+	return filepath.Base(a.path) == name
 }
 
 type astImportList []*astImport

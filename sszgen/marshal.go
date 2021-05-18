@@ -69,7 +69,7 @@ func (v *Value) marshal() string {
 		return fmt.Sprintf("dst = ssz.MarshalBool(dst, ::.%s)", v.fieldName)
 
 	case TypeVector:
-		if v.e.isFixed() {
+		if v.elementType.isFixed() {
 			return v.marshalVector()
 		}
 		fallthrough
@@ -83,18 +83,18 @@ func (v *Value) marshal() string {
 }
 
 func (v *Value) marshalList() string {
-	v.e.fieldName = v.fieldName + "[ii]"
+	v.elementType.fieldName = v.fieldName + "[ii]"
 
 	// bound check
 	str := v.validate()
 
-	if v.e.isFixed() {
+	if v.elementType.isFixed() {
 		tmpl := `for ii := 0; ii < len(::.{{.fieldName}}); ii++ {
 			{{.dynamic}}
 		}`
 		str += execTmpl(tmpl, map[string]interface{}{
 			"fieldName":    v.fieldName,
-			"dynamic": v.e.marshal(),
+			"dynamic": v.elementType.marshal(),
 		})
 		return str
 	}
@@ -116,14 +116,14 @@ func (v *Value) marshalList() string {
 
 	str += execTmpl(tmpl, map[string]interface{}{
 		"fieldName":    v.fieldName,
-		"size":    v.e.size("offset"),
-		"marshal": v.e.marshal(),
+		"size":    v.elementType.size("offset"),
+		"marshal": v.elementType.marshal(),
 	})
 	return str
 }
 
 func (v *Value) marshalVector() (str string) {
-	v.e.fieldName = fmt.Sprintf("%s[ii]", v.fieldName)
+	v.elementType.fieldName = fmt.Sprintf("%s[ii]", v.fieldName)
 
 	tmpl := `{{.validate}}for ii := 0; ii < {{.size}}; ii++ {
 		{{.marshal}}
@@ -132,7 +132,7 @@ func (v *Value) marshalVector() (str string) {
 		"validate": v.validate(),
 		"fieldName":     v.fieldName,
 		"size":     v.s,
-		"marshal":  v.e.marshal(),
+		"marshal":  v.elementType.marshal(),
 	})
 }
 
@@ -162,7 +162,7 @@ func (v *Value) marshalContainer(start bool) string {
 	offset := v.valueSize
 	out := []string{}
 
-	for indx, i := range v.o {
+	for indx, i := range v.fields {
 		var str string
 		if i.isFixed() {
 			// write the content
@@ -176,7 +176,7 @@ func (v *Value) marshalContainer(start bool) string {
 	}
 
 	// write the dynamic parts
-	for indx, i := range v.o {
+	for indx, i := range v.fields {
 		if !i.isFixed() {
 			out = append(out, fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.fieldName, i.marshal()))
 		}

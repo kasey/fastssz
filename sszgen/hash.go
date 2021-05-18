@@ -28,17 +28,17 @@ func (e *env) hashTreeRoot(name string, v *Value) string {
 
 func (v *Value) hashRoots(isList bool, elem Type) string {
 	subName := "i"
-	if v.e.c {
+	if v.elementType.c {
 		subName += "[:]"
 	}
 	inner := ""
-	if !v.e.c && elem == TypeBytes {
+	if !v.elementType.c && elem == TypeBytes {
 		inner = `if len(i) != %d {
 			err = ssz.ErrBytesLength
 			return
 		}
 		`
-		inner = fmt.Sprintf(inner, v.e.s)
+		inner = fmt.Sprintf(inner, v.elementType.s)
 	}
 
 	var appendFn string
@@ -105,7 +105,6 @@ func (v *Value) hashTreeRoot() string {
 		return execTmpl(tmpl, map[string]interface{}{
 			"validate": v.validate(),
 			"fieldName":     name,
-			"size":     v.s,
 		})
 
 	case TypeUint:
@@ -135,13 +134,13 @@ func (v *Value) hashTreeRoot() string {
 		return fmt.Sprintf("hh.PutBool(::.%s)", v.fieldName)
 
 	case TypeVector:
-		return v.hashRoots(false, v.e.sszValueType)
+		return v.hashRoots(false, v.elementType.sszValueType)
 
 	case TypeList:
-		if v.e.isFixed() {
-			if v.e.sszValueType == TypeUint || v.e.sszValueType == TypeBytes {
+		if v.elementType.isFixed() {
+			if v.elementType.sszValueType == TypeUint || v.elementType.sszValueType == TypeBytes {
 				// return hashBasicSlice(v)
-				return v.hashRoots(true, v.e.sszValueType)
+				return v.hashRoots(true, v.elementType.sszValueType)
 			}
 		}
 		tmpl := `{
@@ -174,7 +173,7 @@ func (v *Value) hashTreeRootContainer(start bool) string {
 	}
 
 	out := []string{}
-	for indx, i := range v.o {
+	for indx, i := range v.fields {
 		str := fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.fieldName, i.hashTreeRoot())
 		out = append(out, str)
 	}

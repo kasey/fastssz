@@ -76,8 +76,8 @@ func (v *Value) unmarshal(dst string) string {
 		})
 
 	case TypeVector:
-		if v.e.isFixed() {
-			dst = fmt.Sprintf("%s[ii*%d: (ii+1)*%d]", dst, v.e.valueSize, v.e.valueSize)
+		if v.elementType.isFixed() {
+			dst = fmt.Sprintf("%s[ii*%d: (ii+1)*%d]", dst, v.elementType.valueSize, v.elementType.valueSize)
 
 			tmpl := `{{.create}}
 			for ii := 0; ii < {{.size}}; ii++ {
@@ -86,7 +86,7 @@ func (v *Value) unmarshal(dst string) string {
 			return execTmpl(tmpl, map[string]interface{}{
 				"create":    v.createSlice(),
 				"size":      v.s,
-				"unmarshal": v.e.unmarshal(dst),
+				"unmarshal": v.elementType.unmarshal(dst),
 			})
 		}
 		fallthrough
@@ -110,8 +110,8 @@ func (v *Value) unmarshalList() string {
 	// In order to use createSlice with a dynamic list we need to set v.s to 0
 	v.s = 0
 
-	if v.e.isFixed() {
-		dst := fmt.Sprintf("buf[ii*%d: (ii+1)*%d]", v.e.valueSize, v.e.valueSize)
+	if v.elementType.isFixed() {
+		dst := fmt.Sprintf("buf[ii*%d: (ii+1)*%d]", v.elementType.valueSize, v.elementType.valueSize)
 
 		tmpl := `num, err := ssz.DivideInt2(len(buf), {{.size}}, {{.max}})
 		if err != nil {
@@ -122,10 +122,10 @@ func (v *Value) unmarshalList() string {
 			{{.unmarshal}}
 		}`
 		return execTmpl(tmpl, map[string]interface{}{
-			"size":      v.e.valueSize,
+			"size":      v.elementType.valueSize,
 			"max":       maxSize,
 			"create":    v.createSlice(),
-			"unmarshal": v.e.unmarshal(dst),
+			"unmarshal": v.elementType.unmarshal(dst),
 		})
 	}
 
@@ -149,12 +149,12 @@ func (v *Value) unmarshalList() string {
 		return err
 	}`
 
-	v.e.fieldName = v.fieldName + "[indx]"
+	v.elementType.fieldName = v.fieldName + "[indx]"
 
 	data := map[string]interface{}{
 		"size":      maxSize,
 		"create":    v.createSlice(),
-		"unmarshal": v.e.unmarshal("buf"),
+		"unmarshal": v.elementType.unmarshal("buf"),
 	}
 	return execTmpl(tmpl, data)
 }
@@ -182,7 +182,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 	var offsets []string
 	offsetsMatch := map[string]string{}
 
-	for indx, i := range v.o {
+	for indx, i := range v.fields {
 		if !i.isFixed() {
 			name := "o" + strconv.Itoa(indx)
 			if len(offsets) != 0 {
@@ -226,7 +226,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 	// Marshal the fixed part and offsets
 
 	outs := []string{}
-	for indx, i := range v.o {
+	for indx, i := range v.fields {
 
 		// How much it increases on every item
 		var incr uint64
@@ -277,7 +277,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 	// Marshal the dynamic parts
 
 	c := 0
-	for indx, i := range v.o {
+	for indx, i := range v.fields {
 		if !i.isFixed() {
 
 			from := offsets[c]
@@ -324,26 +324,26 @@ func (v *Value) createSlice() string {
 		size = strconv.Itoa(int(v.s))
 	}
 
-	switch v.e.sszValueType {
+	switch v.elementType.sszValueType {
 	case TypeUint:
 		// []int uses the Extend functions in the fastssz package
-		return fmt.Sprintf("::.%s = ssz.Extend%s(::.%s, %s)", v.fieldName, v.e.uintVToName(), v.fieldName, size)
+		return fmt.Sprintf("::.%s = ssz.Extend%s(::.%s, %s)", v.fieldName, v.elementType.uintVToName(), v.fieldName, size)
 
 	case TypeContainer:
 		// []*(ref.)Struct{}
-		return fmt.Sprintf("::.%s = make([]*%s, %s)", v.fieldName, v.e.objRef(), size)
+		return fmt.Sprintf("::.%s = make([]*%s, %s)", v.fieldName, v.elementType.objRef(), size)
 
 	case TypeBytes:
 		// [][]byte
 		if v.c {
 			return ""
 		}
-		if v.e.c {
-			return fmt.Sprintf("::.%s = make([][%d]byte, %s)", v.fieldName, v.e.s, size)
+		if v.elementType.c {
+			return fmt.Sprintf("::.%s = make([][%d]byte, %s)", v.fieldName, v.elementType.s, size)
 		}
 		return fmt.Sprintf("::.%s = make([][]byte, %s)", v.fieldName, size)
 
 	default:
-		panic(fmt.Sprintf("create not implemented for type %s", v.e.sszValueType.String()))
+		panic(fmt.Sprintf("create not implemented for type %s", v.elementType.sszValueType.String()))
 	}
 }

@@ -51,7 +51,7 @@ func (v *Value) sizeContainer(name string, start bool) string {
 		})
 	}
 	out := []string{}
-	for indx, v := range v.o {
+	for indx, v := range v.fields {
 		if !v.isFixed() {
 			out = append(out, fmt.Sprintf("// Field (%d) '%s'\n%s", indx, v.fieldName, v.size(name)))
 		}
@@ -86,10 +86,10 @@ func (v *Value) size(name string) string {
 		fallthrough
 
 	case TypeVector:
-		if v.e.isFixed() {
-			return fmt.Sprintf("%s += len(::.%s) * %d", name, v.fieldName, v.e.valueSize)
+		if v.elementType.isFixed() {
+			return fmt.Sprintf("%s += len(::.%s) * %d", name, v.fieldName, v.elementType.valueSize)
 		}
-		v.e.fieldName = v.fieldName + "[ii]"
+		v.elementType.fieldName = v.fieldName + "[ii]"
 		tmpl := `for ii := 0; ii < len(::.{{.fieldName}}); ii++ {
 			{{.size}} += 4
 			{{.dynamic}}
@@ -97,7 +97,7 @@ func (v *Value) size(name string) string {
 		return execTmpl(tmpl, map[string]interface{}{
 			"fieldName":    v.fieldName,
 			"size":    name,
-			"dynamic": v.e.size(name),
+			"dynamic": v.elementType.size(name),
 		})
 
 	default:

@@ -18,10 +18,10 @@ type Value struct {
 	s uint64
 	// type of the value
 	sszValueType Type
-	// array of values for a container
-	o []*Value
-	// type of item for an array
-	e *Value
+	// fields (for a struct type)
+	fields []*Value
+	// type of elements (for a vector/list type)
+	elementType *Value
 	// auxiliary boolean
 	c bool
 	// another auxiliary int number
@@ -49,12 +49,12 @@ func (v *Value) objRef() string {
 func (v *Value) copy() *Value {
 	vv := new(Value)
 	*vv = *v
-	vv.o = make([]*Value, len(v.o))
-	for indx := range v.o {
-		vv.o[indx] = v.o[indx].copy()
+	vv.fields = make([]*Value, len(v.fields))
+	for indx := range v.fields {
+		vv.fields[indx] = v.fields[indx].copy()
 	}
-	if v.e != nil {
-		vv.e = v.e.copy()
+	if v.elementType != nil {
+		vv.elementType = v.elementType.copy()
 	}
 	return vv
 }
@@ -62,7 +62,7 @@ func (v *Value) copy() *Value {
 func (v *Value) isFixed() bool {
 	switch v.sszValueType {
 	case TypeVector:
-		return v.e.isFixed()
+		return v.elementType.isFixed()
 
 	case TypeBytes:
 		if v.s != 0 {
@@ -104,7 +104,7 @@ func (v *Value) detectImports() []string {
 	// for sure v is a container
 	// check if any of the fields in the container has an import
 	refs := []string{}
-	for _, i := range v.o {
+	for _, i := range v.fields {
 		var ref string
 		switch i.sszValueType {
 		case TypeReference:
@@ -115,7 +115,7 @@ func (v *Value) detectImports() []string {
 		case TypeContainer:
 			ref = i.ref
 		case TypeList, TypeVector:
-			ref = i.e.ref
+			ref = i.elementType.ref
 		default:
 			ref = i.ref
 		}

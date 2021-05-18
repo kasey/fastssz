@@ -459,29 +459,6 @@ func isFuncDecl(funcDecl *ast.FuncDecl) bool {
 	return false
 }
 
-type astImport struct {
-	alias string
-	path  string
-}
-
-func (a *astImport) getFullName() string {
-	if a.alias != "" {
-		return fmt.Sprintf("%s \"%s\"", a.alias, a.path)
-	}
-	return fmt.Sprintf("\"%s\"", a.path)
-}
-
-func (a *astImport) match(name string) bool {
-	if a.alias != "" {
-		return a.alias == name
-	}
-	return filepath.Base(a.path) == name
-}
-
-func trimQuotes(a string) string {
-	return strings.Trim(a, "\"")
-}
-
 func decodeASTImports(file *ast.File) []*astImport {
 	imports := []*astImport{}
 	for _, i := range file.Imports {
@@ -492,7 +469,7 @@ func decodeASTImports(file *ast.File) []*astImport {
 			}
 			alias = i.Name.Name
 		}
-		path := trimQuotes(i.Path.Value)
+		path := strings.Trim(i.Path.Value, "\"")
 		imports = append(imports, &astImport{
 			alias: alias,
 			path:  path,
@@ -638,7 +615,7 @@ func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, erro
 	v := &Value{
 		fieldName:    name,
 		sszValueType: TypeContainer,
-		o:            []*Value{},
+		fields:       []*Value{},
 	}
 
 	for _, f := range typ.Fields.List {
@@ -666,11 +643,11 @@ func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, erro
 			continue
 		}
 		elem.fieldName = name
-		v.o = append(v.o, elem)
+		v.fields = append(v.fields, elem)
 	}
 
 	// get the total size of the container
-	for _, f := range v.o {
+	for _, f := range v.fields {
 		if f.isFixed() {
 			v.valueSize += f.valueSize
 		} else {
@@ -758,10 +735,10 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			}
 			if t == TypeVector {
 				// vector
-				return &Value{sszValueType: TypeVector, c: fCheck, valueSize: f * s, s: f, e: &Value{sszValueType: TypeBytes, c: sCheck, valueSize: s, s: s}}, nil
+				return &Value{sszValueType: TypeVector, c: fCheck, valueSize: f * s, s: f, elementType: &Value{sszValueType: TypeBytes, c: sCheck, valueSize: s, s: s}}, nil
 			}
 			// list
-			return &Value{sszValueType: TypeList, s: f, e: &Value{sszValueType: TypeBytes, c: sCheck, valueSize: s, s: s}}, nil
+			return &Value{sszValueType: TypeList, s: f, elementType: &Value{sszValueType: TypeBytes, c: sCheck, valueSize: s, s: s}}, nil
 		}
 
 		// []*Struct
@@ -771,7 +748,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		}
 		if size, ok := getTagsInt(tags, "ssz-size"); ok {
 			// fixed vector
-			v := &Value{sszValueType: TypeVector, s: size, e: elem}
+			v := &Value{sszValueType: TypeVector, s: size, elementType: elem}
 			if elem.isFixed() {
 				// set the total size
 				v.valueSize = size * elem.valueSize
@@ -783,7 +760,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		if !ok {
 			return nil, fmt.Errorf("slice '%s' expects either ssz-max or ssz-size", name)
 		}
-		v := &Value{sszValueType: TypeList, e: elem, s: maxSize, m: maxSize}
+		v := &Value{sszValueType: TypeList, elementType: elem, s: maxSize, m: maxSize}
 		return v, nil
 
 	case *ast.Ident:
