@@ -694,7 +694,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			if err != nil {
 				return nil, err
 			}
-			v.ref = ref
+			v.referencePackageAlias = ref
 			return v, nil
 
 		default:
@@ -811,7 +811,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		if err != nil {
 			return nil, err
 		}
-		vv.ref = name
+		vv.referencePackageAlias = name
 		vv.noPtr = true
 		return vv, nil
 

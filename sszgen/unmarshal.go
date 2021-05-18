@@ -51,9 +51,9 @@ func (v *Value) unmarshal(dst string) string {
 		})
 
 	case TypeUint:
-		if v.ref != "" {
+		if v.referencePackageAlias != "" {
 			// alias, we need to cast the value
-			return fmt.Sprintf("::.%s = %s.%s(ssz.Unmarshall%s(%s))", v.fieldName, v.ref, v.structName, v.uintVToName(), dst)
+			return fmt.Sprintf("::.%s = %s.%s(ssz.Unmarshall%s(%s))", v.fieldName, v.referencePackageAlias, v.structName, v.uintVToName(), dst)
 		}
 		if v.structName != "" {
 			// alias to a type on the same package
@@ -330,7 +330,7 @@ func (v *Value) createSlice() string {
 		return fmt.Sprintf("::.%s = ssz.Extend%s(::.%s, %s)", v.fieldName, v.elementType.uintVToName(), v.fieldName, size)
 
 	case TypeContainer:
-		// []*(ref.)Struct{}
+		// []*(referencePackageAlias.)Struct{}
 		return fmt.Sprintf("::.%s = make([]*%s, %s)", v.fieldName, v.elementType.objRef(), size)
 
 	case TypeBytes:

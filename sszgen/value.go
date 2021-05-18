@@ -26,9 +26,14 @@ type Value struct {
 	sizeIsVariable bool
 	// maxSize is the value from ssz-max annotation
 	maxSize uint64
-	// ref is the external reference if the struct is imported
-	// from another package
-	ref string
+	// referencePackageAlias is the external reference if the struct is imported
+	// from another package, eg:
+	// import "ethpb "github.com/prysmaticlabs/ethereumapis/eth/v1alpha1"
+	// type Foo struct {
+	//   slashing ethpb.AttesterSlashing
+	// } //       ^ ethpb would be the 'referencePackageAlias' field for the Value representing 'slashing'
+	//
+	referencePackageAlias string
 	// new determines if the value is a pointer
 	noPtr bool
 }
@@ -40,10 +45,10 @@ func (v *Value) isListElem() bool {
 func (v *Value) objRef() string {
 	// global reference of the object including the package if the reference
 	// is from an external package
-	if v.ref == "" {
+	if v.referencePackageAlias == "" {
 		return v.structName
 	}
-	return v.ref + "." + v.structName
+	return v.referencePackageAlias + "." + v.structName
 }
 
 func (v *Value) copy() *Value {
@@ -110,14 +115,14 @@ func (v *Value) detectImports() []string {
 		case TypeReference:
 			if !i.noPtr {
 				// it is not a typed reference
-				ref = i.ref
+				ref = i.referencePackageAlias
 			}
 		case TypeContainer:
-			ref = i.ref
+			ref = i.referencePackageAlias
 		case TypeList, TypeVector:
-			ref = i.elementType.ref
+			ref = i.elementType.referencePackageAlias
 		default:
-			ref = i.ref
+			ref = i.referencePackageAlias
 		}
 		if ref != "" {
 			refs = append(refs, ref)

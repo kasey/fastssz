@@ -109,7 +109,7 @@ func (v *Value) hashTreeRoot() string {
 
 	case TypeUint:
 		var name string
-		if v.ref != "" || v.structName != "" {
+		if v.referencePackageAlias != "" || v.structName != "" {
 			// alias to Uint64
 			name = fmt.Sprintf("uint64(::.%s)", v.fieldName)
 		} else {
