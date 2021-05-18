@@ -127,7 +127,7 @@ func (v *Value) hashTreeRoot() string {
 		`
 		return execTmpl(tmpl, map[string]interface{}{
 			"fieldName": v.fieldName,
-			"size": v.m,
+			"size": v.maxSize,
 		})
 
 	case TypeBool:
@@ -159,7 +159,7 @@ func (v *Value) hashTreeRoot() string {
 		}`
 		return execTmpl(tmpl, map[string]interface{}{
 			"fieldName": v.fieldName,
-			"num":  v.m,
+			"num":  v.maxSize,
 		})
 
 	default:

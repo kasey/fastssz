@@ -24,8 +24,8 @@ type Value struct {
 	elementType *Value
 	// auxiliary boolean
 	sizeIsVariable bool
-	// another auxiliary int number
-	m uint64
+	// maxSize is the value from ssz-max annotation
+	maxSize uint64
 	// ref is the external reference if the struct is imported
 	// from another package
 	ref string

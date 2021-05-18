@@ -36,7 +36,7 @@ func (v *Value) unmarshal(dst string) string {
 		validate := ""
 		if v.sizeInBytes == 0 {
 			// dynamic bytes, we need to validate the size of the buffer
-			validate = fmt.Sprintf("if len(%s) > %d { return ssz.ErrBytesLength }\n", dst, v.m)
+			validate = fmt.Sprintf("if len(%s) > %d { return ssz.ErrBytesLength }\n", dst, v.maxSize)
 		}
 		// both fixed and dynamic are decoded equally
 		tmpl := `{{.validate}}if cap(::.{{.fieldName}}) == 0 {
@@ -47,7 +47,7 @@ func (v *Value) unmarshal(dst string) string {
 			"validate": validate,
 			"fieldName":     v.fieldName,
 			"dst":      dst,
-			"size":     v.m,
+			"size":     v.maxSize,
 		})
 
 	case TypeUint:
@@ -72,7 +72,7 @@ func (v *Value) unmarshal(dst string) string {
 		return execTmpl(tmpl, map[string]interface{}{
 			"fieldName": v.fieldName,
 			"dst":  dst,
-			"size": v.m,
+			"size": v.maxSize,
 		})
 
 	case TypeVector:

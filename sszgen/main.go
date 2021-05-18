@@ -714,7 +714,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 				if !ok {
 					return nil, fmt.Errorf("bitfield requires a 'ssz-max' field")
 				}
-				return &Value{sszValueType: TypeBitList, m: max, sizeInBytes: max}, nil
+				return &Value{sszValueType: TypeBitList, maxSize: max, sizeInBytes: max}, nil
 			}
 			size, ok := getTagsInt(tags, "ssz-size")
 			if ok {
@@ -726,7 +726,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 				return nil, fmt.Errorf("[]byte expects either ssz-max or ssz-size")
 			}
 			// dynamic bytes
-			return &Value{sszValueType: TypeBytes, m: max}, nil
+			return &Value{sszValueType: TypeBytes, maxSize: max}, nil
 		}
 		if isArray(obj.Elt) && isByte(obj.Elt.(*ast.ArrayType).Elt) {
 			f, fCheck, s, sCheck, t, err := getRootSizes(obj, tags)
@@ -760,7 +760,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		if !ok {
 			return nil, fmt.Errorf("slice '%s' expects either ssz-max or ssz-size", name)
 		}
-		v := &Value{sszValueType: TypeList, elementType: elem, sizeInBytes: maxSize, m: maxSize}
+		v := &Value{sszValueType: TypeList, elementType: elem, sizeInBytes: maxSize, maxSize: maxSize}
 		return v, nil
 
 	case *ast.Ident:
@@ -797,7 +797,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			if !ok {
 				return nil, fmt.Errorf("bitlist %s does not have ssz-max tag", name)
 			}
-			return &Value{sszValueType: TypeBitList, m: maxSize, sizeInBytes: maxSize}, nil
+			return &Value{sszValueType: TypeBitList, maxSize: maxSize, sizeInBytes: maxSize}, nil
 		} else if strings.HasPrefix(sel, "Bitvector") {
 			// go-bitfield/Bitvector, fixed bytes
 			size, ok := getTagsInt(tags, "ssz-size")

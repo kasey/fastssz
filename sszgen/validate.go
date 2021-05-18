@@ -14,7 +14,7 @@ func (v *Value) validate() string {
 		size := v.sizeInBytes
 		if size == 0 {
 			// dynamic []byte
-			size = v.m
+			size = v.maxSize
 			cmp = ">"
 		}
 
