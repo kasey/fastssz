@@ -594,7 +594,7 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		}
 		if raw.implFunc {
 			size, _ := getTagsInt(tags, "ssz-size")
-			v = &Value{sszValueType: TypeReference, s: size, valueSize: size, noPtr: raw.obj == nil}
+			v = &Value{sszValueType: TypeReference, sizeInBytes: size, valueSize: size, noPtr: raw.obj == nil}
 		} else if raw.obj != nil {
 			v, err = e.parseASTStructType(name, raw.obj)
 		} else {
@@ -653,7 +653,7 @@ func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, erro
 		} else {
 			v.valueSize += bytesPerLengthOffset
 			// container is dynamic
-			v.c = true
+			v.sizeIsVariable = true
 		}
 	}
 	return v, nil
@@ -705,7 +705,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		if isByte(obj.Elt) {
 			if fixedlen := getObjLen(obj); fixedlen != 0 {
 				// array of fixed size
-				return &Value{sszValueType: TypeBytes, c: true, s: fixedlen, valueSize: fixedlen}, nil
+				return &Value{sszValueType: TypeBytes, sizeIsVariable: true, sizeInBytes: fixedlen, valueSize: fixedlen}, nil
 			}
 			// []byte
 			if tag, ok := getTags(tags, "ssz"); ok && tag == "bitlist" {
@@ -714,12 +714,12 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 				if !ok {
 					return nil, fmt.Errorf("bitfield requires a 'ssz-max' field")
 				}
-				return &Value{sszValueType: TypeBitList, m: max, s: max}, nil
+				return &Value{sszValueType: TypeBitList, m: max, sizeInBytes: max}, nil
 			}
 			size, ok := getTagsInt(tags, "ssz-size")
 			if ok {
 				// fixed bytes
-				return &Value{sszValueType: TypeBytes, s: size, valueSize: size}, nil
+				return &Value{sszValueType: TypeBytes, sizeInBytes: size, valueSize: size}, nil
 			}
 			max, ok := getTagsInt(tags, "ssz-max")
 			if !ok {
@@ -735,10 +735,10 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			}
 			if t == TypeVector {
 				// vector
-				return &Value{sszValueType: TypeVector, c: fCheck, valueSize: f * s, s: f, elementType: &Value{sszValueType: TypeBytes, c: sCheck, valueSize: s, s: s}}, nil
+				return &Value{sszValueType: TypeVector, sizeIsVariable: fCheck, valueSize: f * s, sizeInBytes: f, elementType: &Value{sszValueType: TypeBytes, sizeIsVariable: sCheck, valueSize: s, sizeInBytes: s}}, nil
 			}
 			// list
-			return &Value{sszValueType: TypeList, s: f, elementType: &Value{sszValueType: TypeBytes, c: sCheck, valueSize: s, s: s}}, nil
+			return &Value{sszValueType: TypeList, sizeInBytes: f, elementType: &Value{sszValueType: TypeBytes, sizeIsVariable: sCheck, valueSize: s, sizeInBytes: s}}, nil
 		}
 
 		// []*Struct
@@ -748,7 +748,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		}
 		if size, ok := getTagsInt(tags, "ssz-size"); ok {
 			// fixed vector
-			v := &Value{sszValueType: TypeVector, s: size, elementType: elem}
+			v := &Value{sszValueType: TypeVector, sizeInBytes: size, elementType: elem}
 			if elem.isFixed() {
 				// set the total size
 				v.valueSize = size * elem.valueSize
@@ -760,7 +760,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		if !ok {
 			return nil, fmt.Errorf("slice '%s' expects either ssz-max or ssz-size", name)
 		}
-		v := &Value{sszValueType: TypeList, elementType: elem, s: maxSize, m: maxSize}
+		v := &Value{sszValueType: TypeList, elementType: elem, sizeInBytes: maxSize, m: maxSize}
 		return v, nil
 
 	case *ast.Ident:
@@ -797,14 +797,14 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			if !ok {
 				return nil, fmt.Errorf("bitlist %s does not have ssz-max tag", name)
 			}
-			return &Value{sszValueType: TypeBitList, m: maxSize, s: maxSize}, nil
+			return &Value{sszValueType: TypeBitList, m: maxSize, sizeInBytes: maxSize}, nil
 		} else if strings.HasPrefix(sel, "Bitvector") {
 			// go-bitfield/Bitvector, fixed bytes
 			size, ok := getTagsInt(tags, "ssz-size")
 			if !ok {
 				return nil, fmt.Errorf("bitvector %s does not have ssz-size tag", name)
 			}
-			return &Value{sszValueType: TypeBytes, s: size, valueSize: size}, nil
+			return &Value{sszValueType: TypeBytes, sizeInBytes: size, valueSize: size}, nil
 		}
 		// external reference
 		vv, err := e.encodeItem(sel, tags)

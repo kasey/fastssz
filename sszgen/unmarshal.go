@@ -30,11 +30,11 @@ func (v *Value) unmarshal(dst string) string {
 		return v.umarshalContainer(false, dst)
 
 	case TypeBytes:
-		if v.c {
+		if v.sizeIsVariable {
 			return fmt.Sprintf("copy(::.%s[:], %s)", v.fieldName, dst)
 		}
 		validate := ""
-		if v.s == 0 {
+		if v.sizeInBytes == 0 {
 			// dynamic bytes, we need to validate the size of the buffer
 			validate = fmt.Sprintf("if len(%s) > %d { return ssz.ErrBytesLength }\n", dst, v.m)
 		}
@@ -85,7 +85,7 @@ func (v *Value) unmarshal(dst string) string {
 			}`
 			return execTmpl(tmpl, map[string]interface{}{
 				"create":    v.createSlice(),
-				"size":      v.s,
+				"size":      v.sizeInBytes,
 				"unmarshal": v.elementType.unmarshal(dst),
 			})
 		}
@@ -105,10 +105,10 @@ func (v *Value) unmarshal(dst string) string {
 func (v *Value) unmarshalList() string {
 
 	// The Go field must have a 'ssz-max' tag to set the maximum number of items
-	maxSize := v.s
+	maxSize := v.sizeInBytes
 
-	// In order to use createSlice with a dynamic list we need to set v.s to 0
-	v.s = 0
+	// In order to use createSlice with a dynamic list we need to set v.sizeInBytes to 0
+	v.sizeInBytes = 0
 
 	if v.elementType.isFixed() {
 		dst := fmt.Sprintf("buf[ii*%d: (ii+1)*%d]", v.elementType.valueSize, v.elementType.valueSize)
@@ -315,13 +315,13 @@ func (v *Value) createSlice() string {
 		panic("BUG: create item is only intended to be used with vectors and lists")
 	}
 
-	// If v.s is set (fixed slice) we use that value, otherwise (variable size)
+	// If v.sizeInBytes is set (fixed slice) we use that value, otherwise (variable size)
 	// we assume there is a 'num' variable generated beforehand with the expected size.
 	var size string
-	if v.s == 0 {
+	if v.sizeInBytes == 0 {
 		size = "num"
 	} else {
-		size = strconv.Itoa(int(v.s))
+		size = strconv.Itoa(int(v.sizeInBytes))
 	}
 
 	switch v.elementType.sszValueType {
@@ -335,11 +335,11 @@ func (v *Value) createSlice() string {
 
 	case TypeBytes:
 		// [][]byte
-		if v.c {
+		if v.sizeIsVariable {
 			return ""
 		}
-		if v.elementType.c {
-			return fmt.Sprintf("::.%s = make([][%d]byte, %s)", v.fieldName, v.elementType.s, size)
+		if v.elementType.sizeIsVariable {
+			return fmt.Sprintf("::.%s = make([][%d]byte, %s)", v.fieldName, v.elementType.sizeInBytes, size)
 		}
 		return fmt.Sprintf("::.%s = make([][]byte, %s)", v.fieldName, size)
 

@@ -7,11 +7,11 @@ func (v *Value) validate() string {
 		if v.sszValueType == TypeBitList {
 			cmp = ">"
 		}
-		if v.c {
+		if v.sizeIsVariable {
 			return ""
 		}
 		// fixed []byte
-		size := v.s
+		size := v.sizeInBytes
 		if size == 0 {
 			// dynamic []byte
 			size = v.m
@@ -30,7 +30,7 @@ func (v *Value) validate() string {
 		})
 
 	case TypeVector:
-		if v.c {
+		if v.sizeIsVariable {
 			return ""
 		}
 		// We only have vectors for [][]byte roots
@@ -41,7 +41,7 @@ func (v *Value) validate() string {
 		`
 		return execTmpl(tmpl, map[string]interface{}{
 			"fieldName": v.fieldName,
-			"size": v.s,
+			"size": v.sizeInBytes,
 		})
 
 	case TypeList:
@@ -52,7 +52,7 @@ func (v *Value) validate() string {
 		`
 		return execTmpl(tmpl, map[string]interface{}{
 			"fieldName": v.fieldName,
-			"size": v.s,
+			"size": v.sizeInBytes,
 		})
 
 	default:

@@ -15,7 +15,7 @@ type Value struct {
 	// valueSize is the fixed size of the value
 	valueSize uint64
 	// auxiliary int number
-	s uint64
+	sizeInBytes uint64
 	// type of the value
 	sszValueType Type
 	// fields (for a struct type)
@@ -23,7 +23,7 @@ type Value struct {
 	// type of elements (for a vector/list type)
 	elementType *Value
 	// auxiliary boolean
-	c bool
+	sizeIsVariable bool
 	// another auxiliary int number
 	m uint64
 	// ref is the external reference if the struct is imported
@@ -65,7 +65,7 @@ func (v *Value) isFixed() bool {
 		return v.elementType.isFixed()
 
 	case TypeBytes:
-		if v.s != 0 {
+		if v.sizeInBytes != 0 {
 			// fixed bytes
 			return true
 		}
@@ -73,7 +73,7 @@ func (v *Value) isFixed() bool {
 		return false
 
 	case TypeContainer:
-		return !v.c
+		return !v.sizeIsVariable
 
 	// Dynamic types
 	case TypeBitList:
@@ -90,7 +90,7 @@ func (v *Value) isFixed() bool {
 		return true
 
 	case TypeReference:
-		if v.s != 0 {
+		if v.sizeInBytes != 0 {
 			return true
 		}
 		return false
@@ -128,24 +128,6 @@ func (v *Value) detectImports() []string {
 
 func (v *Value) isBasicType() bool {
 	return v.sszValueType == TypeUint || v.sszValueType == TypeBool || v.sszValueType == TypeBytes
-}
-
-func uintVToName(v *Value) string {
-	if v.sszValueType != TypeUint {
-		panic("not expected")
-	}
-	switch v.valueSize {
-	case 8:
-		return "Uint64"
-	case 4:
-		return "Uint32"
-	case 2:
-		return "Uint16"
-	case 1:
-		return "Uint8"
-	default:
-		panic("not found")
-	}
 }
 
 func (v *Value) uintVToName() string {

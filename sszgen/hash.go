@@ -28,17 +28,17 @@ func (e *env) hashTreeRoot(name string, v *Value) string {
 
 func (v *Value) hashRoots(isList bool, elem Type) string {
 	subName := "i"
-	if v.elementType.c {
+	if v.elementType.sizeIsVariable {
 		subName += "[:]"
 	}
 	inner := ""
-	if !v.elementType.c && elem == TypeBytes {
+	if !v.elementType.sizeIsVariable && elem == TypeBytes {
 		inner = `if len(i) != %d {
 			err = ssz.ErrBytesLength
 			return
 		}
 		`
-		inner = fmt.Sprintf(inner, v.elementType.s)
+		inner = fmt.Sprintf(inner, v.elementType.sizeInBytes)
 	}
 
 	var appendFn string
@@ -60,7 +60,7 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 
 		merkleize = execTmpl(tmpl, map[string]interface{}{
 			"fieldName":     v.fieldName,
-			"listSize": v.s,
+			"listSize": v.sizeInBytes,
 			"elemSize": elemSize,
 		})
 
@@ -97,7 +97,7 @@ func (v *Value) hashTreeRoot() string {
 	case TypeBytes:
 		// There are only fixed []byte
 		name := v.fieldName
-		if v.c {
+		if v.sizeIsVariable {
 			name += "[:]"
 		}
 

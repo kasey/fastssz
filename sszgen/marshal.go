@@ -42,7 +42,7 @@ func (v *Value) marshal() string {
 
 	case TypeBytes:
 		name := v.fieldName
-		if v.c {
+		if v.sizeIsVariable {
 			name += "[:]"
 		}
 		tmpl := `{{.validate}}dst = append(dst, ::.{{.fieldName}}...)`
@@ -131,7 +131,7 @@ func (v *Value) marshalVector() (str string) {
 	return execTmpl(tmpl, map[string]interface{}{
 		"validate": v.validate(),
 		"fieldName":     v.fieldName,
-		"size":     v.s,
+		"size":     v.sizeInBytes,
 		"marshal":  v.elementType.marshal(),
 	})
 }
