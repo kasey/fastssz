@@ -19,19 +19,6 @@ func NewEnv(sourcePackage *ast.Package, referencePackages map[string]*ast.Packag
 	}
 }
 
-// IsCodegenTarget decides if the ssz methodset should be generated
-// for a type with the given name
-// TODO: maybe this should include some idea of a package/namespace
-func (e *env) IsCodegenTarget(name string) bool {
-	// if explicit code generation targets weren't specified,
-	// we want to generate methodsets for everything
-	if len(e.sszTypeNames) == 0 {
-		return true
-	}
-	_, ok := e.sszTypeNames[name]
-	return ok
-}
-
 // Creates a list of targets for code generation. Some entries in
 // e.raw are references, which means we assume their methodset is
 // defined elsewhere and skip them. Otherwise we look to see if

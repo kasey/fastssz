@@ -59,6 +59,30 @@ func (v *Value) sizeContainer(name string, start bool) string {
 	return strings.Join(out, "\n\n")
 }
 
+type ValueContainer struct {
+	value Value
+}
+
+type ValueReference struct {
+	value Value
+}
+
+type ValueBitList struct {
+	value Value
+}
+
+type ValueBytes struct {
+	value Value
+}
+
+type ValueList struct {
+	value Value
+}
+
+type ValueVector struct {
+	value Value
+}
+
 // 'fieldName' is the fieldName of target variable we assign the size too. We also use this function
 // during marshalling to figure out the size of the offset
 func (v *Value) size(name string) string {

@@ -36,6 +36,15 @@ type Value struct {
 	referencePackageAlias string
 	// new determines if the value is a pointer
 	noPtr bool
+	// When a value is contained by another Value as a field,
+	// parentValue holds a reference to the containing Value
+	parent *Value
+	// fieldOffset is the position of a field within a container
+	fieldOffset int
+}
+
+func (v *ValueRenderer) StructName() string {
+	return v.structName
 }
 
 func (v *Value) isListElem() bool {
@@ -151,4 +160,36 @@ func (v *Value) uintVToName() string {
 	default:
 		panic("not found")
 	}
+}
+
+func (v *Value) parentRoot() *Value {
+	// boundary case where v is already the parent
+	//parent := v
+	// when v.parent is nil, we are at the root
+	/*
+	for parent := v; parent != nil; parent = parent.parent {
+	}
+	return parent
+	 */
+	if v.parent == nil {
+		return v
+	}
+	return v.parent.parentRoot()
+}
+
+func (v *Value) ReceiverName() string {
+	root := v.parentRoot()
+	return strings.ToLower(string(root.structName[0]))
+}
+
+func (v *ValueRenderer) ReceiverName() string {
+	return v.Value.ReceiverName()
+}
+
+func (v *ValueRenderer) Fields() []*Value {
+	return v.fields
+}
+
+func (v *ValueRenderer) HashTreeRoot() string {
+	return v.Value.HashTreeRoot()
 }

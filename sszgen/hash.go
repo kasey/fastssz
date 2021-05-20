@@ -2,28 +2,26 @@ package sszgen
 
 import (
 	"fmt"
-	"strings"
 )
 
 // hashTreeRoot creates a function that SSZ hashes the structs,
-func (e *env) hashTreeRoot(name string, v *Value) string {
-	tmpl := `// HashTreeRoot ssz hashes the {{.name}} object
-	func (:: *{{.name}}) HashTreeRoot() ([32]byte, error) {
-		return ssz.HashWithDefaultHasher(::)
+func (e *env) hashTreeRoot(v *ValueRenderer) string {
+	tmpl := `// HashTreeRoot ssz hashes the {{.StructName}} object
+	func ({{.ReceiverName}} *{{.StructName}}) HashTreeRoot() ([32]byte, error) {
+		return ssz.HashWithDefaultHasher({{.ReceiverName}})
 	}
 	
-	// HashTreeRootWith ssz hashes the {{.name}} object with a hasher
-	func (:: *{{.name}}) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-		{{.hashTreeRoot}}
+	// HashTreeRootWith ssz hashes the {{.StructName}} object with a hasher
+	func ({{.ReceiverName}} *{{.StructName}}) HashTreeRootWith(hh *ssz.Hasher) (err error) {
+		indx := hh.Index()
+		{{ range .Fields }}
+		{{ .HashTreeRoot }}
+		{{ end }}
+		hh.Merkleize(indx)
 		return
 	}`
 
-	data := map[string]interface{}{
-		"name":         name,
-		"hashTreeRoot": v.hashTreeRootContainer(true),
-	}
-	str := execTmpl(tmpl, data)
-	return appendObjSignature(str, v)
+	return execTmpl(tmpl, v)
 }
 
 func (v *Value) hashRoots(isList bool, elem Type) string {
@@ -55,13 +53,14 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 
 	var merkleize string
 	if isList {
-		tmpl := `numItems := uint64(len(::.{{.fieldName}}))
+		tmpl := `numItems := uint64(len({{.ReceiverName}}.{{.fieldName}}))
 		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit({{.listSize}}, numItems, {{.elemSize}}))`
 
 		merkleize = execTmpl(tmpl, map[string]interface{}{
 			"fieldName":     v.fieldName,
 			"listSize": v.sizeInBytes,
 			"elemSize": elemSize,
+			"ReceiverName": v.ReceiverName(),
 		})
 
 		// when doing []uint64 we need to round up the Hasher bytes to 32
@@ -74,7 +73,7 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 
 	tmpl := `{
 		{{.outer}}subIndx := hh.Index()
-		for _, i := range ::.{{.fieldName}} {
+		for _, i := range {{.ReceiverName}}.{{.fieldName}} {
 			{{.inner}}hh.{{.appendFn}}({{.subName}})
 		}
 		{{.merkleize}}
@@ -86,13 +85,15 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 		"subName":   subName,
 		"appendFn":  appendFn,
 		"merkleize": merkleize,
+		"ReceiverName": v.ReceiverName(),
 	})
 }
 
-func (v *Value) hashTreeRoot() string {
+func (v *Value) HashTreeRoot() string {
+	comment := fmt.Sprintf("// Field (%d) '%s'\n", v.fieldOffset, v.fieldName)
 	switch v.sszValueType {
 	case TypeContainer, TypeReference:
-		return v.hashTreeRootContainer(false)
+		return comment + fmt.Sprintf("if err = %s.%s.HashTreeRootWith(hh); err != nil {\n return\n}", v.ReceiverName(), v.fieldName)
 
 	case TypeBytes:
 		// There are only fixed []byte
@@ -101,37 +102,39 @@ func (v *Value) hashTreeRoot() string {
 			name += "[:]"
 		}
 
-		tmpl := `{{.validate}}hh.PutBytes(::.{{.fieldName}})`
-		return execTmpl(tmpl, map[string]interface{}{
+		tmpl := `{{.validate}}hh.PutBytes({{.ReceiverName}}.{{.fieldName}})`
+		return comment + execTmpl(tmpl, map[string]interface{}{
 			"validate": v.validate(),
 			"fieldName":     name,
+			"ReceiverName": v.ReceiverName(),
 		})
 
 	case TypeUint:
 		var name string
 		if v.referencePackageAlias != "" || v.structName != "" {
 			// alias to Uint64
-			name = fmt.Sprintf("uint64(::.%s)", v.fieldName)
+			name = fmt.Sprintf("uint64(%s.%s)", v.ReceiverName(), v.fieldName)
 		} else {
-			name = "::." + v.fieldName
+			name = v.ReceiverName() + "." + v.fieldName
 		}
 		bitLen := v.valueSize * 8
-		return fmt.Sprintf("hh.PutUint%d(%s)", bitLen, name)
+		return comment + fmt.Sprintf("hh.PutUint%d(%s)", bitLen, name)
 
 	case TypeBitList:
-		tmpl := `if len(::.{{.fieldName}}) == 0 {
+		tmpl := `if len({{.ReceiverName}}.{{.fieldName}}) == 0 {
 			err = ssz.ErrEmptyBitlist
 			return
 		}
-		hh.PutBitlist(::.{{.fieldName}}, {{.size}})
+		hh.PutBitlist({{.ReceiverName}}.{{.fieldName}}, {{.size}})
 		`
-		return execTmpl(tmpl, map[string]interface{}{
+		return comment + execTmpl(tmpl, map[string]interface{}{
 			"fieldName": v.fieldName,
 			"size": v.maxSize,
+			"ReceiverName": v.ReceiverName(),
 		})
 
 	case TypeBool:
-		return fmt.Sprintf("hh.PutBool(::.%s)", v.fieldName)
+		return fmt.Sprintf("hh.PutBool(%s.%s)", v.ReceiverName(), v.fieldName)
 
 	case TypeVector:
 		return v.hashRoots(false, v.elementType.sszValueType)
@@ -145,13 +148,13 @@ func (v *Value) hashTreeRoot() string {
 		}
 		tmpl := `{
 			subIndx := hh.Index()
-			num := uint64(len(::.{{.fieldName}}))
+			num := uint64(len({{.ReceiverName}}.{{.fieldName}}))
 			if num > {{.num}} {
 				err = ssz.ErrIncorrectListSize
 				return
 			}
 			for i := uint64(0); i < num; i++ {
-				if err = ::.{{.fieldName}}[i].HashTreeRootWith(hh); err != nil {
+				if err = {{.ReceiverName}}.{{.fieldName}}[i].HashTreeRootWith(hh); err != nil {
 					return
 				}
 			}
@@ -160,6 +163,7 @@ func (v *Value) hashTreeRoot() string {
 		return execTmpl(tmpl, map[string]interface{}{
 			"fieldName": v.fieldName,
 			"num":  v.maxSize,
+			"ReceiverName": v.ReceiverName(),
 		})
 
 	default:
@@ -167,11 +171,8 @@ func (v *Value) hashTreeRoot() string {
 	}
 }
 
-func (v *Value) hashTreeRootContainer(start bool) string {
-	if !start {
-		return fmt.Sprintf("if err = ::.%s.HashTreeRootWith(hh); err != nil {\n return\n}", v.fieldName)
-	}
-
+/*
+func (v *ValueRenderer) HashTreeRootContainer() string {
 	out := []string{}
 	for indx, i := range v.fields {
 		str := fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.fieldName, i.hashTreeRoot())
@@ -188,3 +189,4 @@ func (v *Value) hashTreeRootContainer(start bool) string {
 		"fields": strings.Join(out, "\n"),
 	})
 }
+*/

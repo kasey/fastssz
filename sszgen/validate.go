@@ -18,7 +18,7 @@ func (v *Value) validate() string {
 			cmp = ">"
 		}
 
-		tmpl := `if len(::.{{.fieldName}}) {{.cmp}} {{.size}} {
+		tmpl := `if len({{.ReceiverName}}.{{.fieldName}}) {{.cmp}} {{.size}} {
 			err = ssz.ErrBytesLength
 			return
 		}
@@ -27,6 +27,7 @@ func (v *Value) validate() string {
 			"cmp":  cmp,
 			"fieldName": v.fieldName,
 			"size": size,
+			"ReceiverName": v.ReceiverName(),
 		})
 
 	case TypeVector:
@@ -34,7 +35,7 @@ func (v *Value) validate() string {
 			return ""
 		}
 		// We only have vectors for [][]byte roots
-		tmpl := `if len(::.{{.fieldName}}) != {{.size}} {
+		tmpl := `if len({{.ReceiverName}}.{{.fieldName}}) != {{.size}} {
 			err = ssz.ErrVectorLength
 			return
 		}
@@ -42,10 +43,11 @@ func (v *Value) validate() string {
 		return execTmpl(tmpl, map[string]interface{}{
 			"fieldName": v.fieldName,
 			"size": v.sizeInBytes,
+			"ReceiverName": v.ReceiverName(),
 		})
 
 	case TypeList:
-		tmpl := `if len(::.{{.fieldName}}) > {{.size}} {
+		tmpl := `if len({{.ReceiverName}}.{{.fieldName}}) > {{.size}} {
 			err = ssz.ErrListTooBig
 			return
 		}
@@ -53,6 +55,7 @@ func (v *Value) validate() string {
 		return execTmpl(tmpl, map[string]interface{}{
 			"fieldName": v.fieldName,
 			"size": v.sizeInBytes,
+			"ReceiverName": v.ReceiverName(),
 		})
 
 	default:

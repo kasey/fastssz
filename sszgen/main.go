@@ -271,7 +271,6 @@ func (e *env) print(first bool, order []string) (string, bool, error) {
 		{{ .Unmarshal }}
 		{{ .Size }}
 		{{ .HashTreeRoot }}
-		{{ .GetTree }}
 	{{ end }}
 	`
 
@@ -281,7 +280,7 @@ func (e *env) print(first bool, order []string) (string, bool, error) {
 	}
 
 	type Obj struct {
-		Size, Marshal, Unmarshal, HashTreeRoot, GetTree string
+		Size, Marshal, Unmarshal, HashTreeRoot string
 	}
 
 	objs := []*Obj{}
@@ -305,10 +304,8 @@ func (e *env) print(first bool, order []string) (string, bool, error) {
 			// require the sszgen functions.
 			continue
 		}
-		getTree := ""
 		objs = append(objs, &Obj{
-			HashTreeRoot: e.hashTreeRoot(name, obj),
-			GetTree:      getTree,
+			HashTreeRoot: e.hashTreeRoot(&ValueRenderer{Value: *obj}),
 			Marshal:      e.marshal(name, obj),
 			Unmarshal:    e.unmarshal(name, obj),
 			Size:         e.size(name, obj),
@@ -577,14 +574,14 @@ func (e *env) generateIR() error {
 	}
 
 	for name, _ := range e.CodegenTargets() {
-		if _, err := e.encodeItem(name, ""); err != nil {
+		if _, err := e.encodeItem(name, 0, nil, ""); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (e *env) encodeItem(name, tags string) (*Value, error) {
+func (e *env) encodeItem(name string, offset int, parent *Value, tags string) (*Value, error) {
 	v, ok := e.objs[name]
 	if !ok {
 		var err error
@@ -594,11 +591,11 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		}
 		if raw.implFunc {
 			size, _ := getTagsInt(tags, "ssz-size")
-			v = &Value{sszValueType: TypeReference, sizeInBytes: size, valueSize: size, noPtr: raw.obj == nil}
+			v = &Value{sszValueType: TypeReference, sizeInBytes: size, valueSize: size, noPtr: raw.obj == nil, parent: parent, fieldOffset: offset}
 		} else if raw.obj != nil {
-			v, err = e.parseASTStructType(name, raw.obj)
+			v, err = e.parseASTStructType(name, offset, parent, raw.obj)
 		} else {
-			v, err = e.parseASTFieldType(name, tags, raw.typ)
+			v, err = e.parseASTFieldType(name, offset, parent, tags, raw.typ)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to encode %s: %v", name, err)
@@ -611,14 +608,16 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 }
 
 // parse the Go AST struct
-func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, error) {
+func (e *env) parseASTStructType(name string, offset int, parent *Value, typ *ast.StructType) (*Value, error) {
 	v := &Value{
 		fieldName:    name,
 		sszValueType: TypeContainer,
 		fields:       []*Value{},
+		parent: parent,
+		fieldOffset: offset,
 	}
 
-	for _, f := range typ.Fields.List {
+	for i, f := range typ.Fields.List {
 		if len(f.Names) != 1 {
 			continue
 		}
@@ -635,7 +634,7 @@ func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, erro
 			tags = f.Tag.Value
 		}
 
-		elem, err := e.parseASTFieldType(name, tags, f.Type)
+		elem, err := e.parseASTFieldType(name, i, v, tags, f.Type)
 		if err != nil {
 			return nil, err
 		}
@@ -672,7 +671,7 @@ func getObjLen(obj *ast.ArrayType) uint64 {
 }
 
 // parse the Go AST field
-func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error) {
+func (e *env) parseASTFieldType(name string, offset int, parent *Value, tags string, expr ast.Expr) (*Value, error) {
 	if tag, ok := getTags(tags, "ssz"); ok && tag == "-" {
 		// omit value
 		return nil, nil
@@ -684,13 +683,13 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		switch elem := obj.X.(type) {
 		case *ast.Ident:
 			// reference to a local package
-			return e.encodeItem(elem.Name, tags)
+			return e.encodeItem(elem.Name, offset, parent, tags)
 
 		case *ast.SelectorExpr:
 			// reference of the external package
 			ref := elem.X.(*ast.Ident).Name
 			// reference to a struct from another package
-			v, err := e.encodeItem(elem.Sel.Name, tags)
+			v, err := e.encodeItem(elem.Sel.Name, offset, parent, tags)
 			if err != nil {
 				return nil, err
 			}
@@ -705,7 +704,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		if isByte(obj.Elt) {
 			if fixedlen := getObjLen(obj); fixedlen != 0 {
 				// array of fixed size
-				return &Value{sszValueType: TypeBytes, sizeIsVariable: true, sizeInBytes: fixedlen, valueSize: fixedlen}, nil
+				return &Value{sszValueType: TypeBytes, sizeIsVariable: true, sizeInBytes: fixedlen, valueSize: fixedlen, parent: parent}, nil
 			}
 			// []byte
 			if tag, ok := getTags(tags, "ssz"); ok && tag == "bitlist" {
@@ -714,19 +713,19 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 				if !ok {
 					return nil, fmt.Errorf("bitfield requires a 'ssz-max' field")
 				}
-				return &Value{sszValueType: TypeBitList, maxSize: max, sizeInBytes: max}, nil
+				return &Value{sszValueType: TypeBitList, maxSize: max, sizeInBytes: max, parent: parent}, nil
 			}
 			size, ok := getTagsInt(tags, "ssz-size")
 			if ok {
 				// fixed bytes
-				return &Value{sszValueType: TypeBytes, sizeInBytes: size, valueSize: size}, nil
+				return &Value{sszValueType: TypeBytes, sizeInBytes: size, valueSize: size, parent: parent}, nil
 			}
 			max, ok := getTagsInt(tags, "ssz-max")
 			if !ok {
 				return nil, fmt.Errorf("[]byte expects either ssz-max or ssz-size")
 			}
 			// dynamic bytes
-			return &Value{sszValueType: TypeBytes, maxSize: max}, nil
+			return &Value{sszValueType: TypeBytes, maxSize: max, parent: parent}, nil
 		}
 		if isArray(obj.Elt) && isByte(obj.Elt.(*ast.ArrayType).Elt) {
 			f, fCheck, s, sCheck, t, err := getRootSizes(obj, tags)
@@ -735,20 +734,20 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			}
 			if t == TypeVector {
 				// vector
-				return &Value{sszValueType: TypeVector, sizeIsVariable: fCheck, valueSize: f * s, sizeInBytes: f, elementType: &Value{sszValueType: TypeBytes, sizeIsVariable: sCheck, valueSize: s, sizeInBytes: s}}, nil
+				return &Value{sszValueType: TypeVector, sizeIsVariable: fCheck, valueSize: f * s, sizeInBytes: f, elementType: &Value{sszValueType: TypeBytes, sizeIsVariable: sCheck, valueSize: s, sizeInBytes: s, parent: parent}}, nil
 			}
 			// list
-			return &Value{sszValueType: TypeList, sizeInBytes: f, elementType: &Value{sszValueType: TypeBytes, sizeIsVariable: sCheck, valueSize: s, sizeInBytes: s}}, nil
+			return &Value{sszValueType: TypeList, sizeInBytes: f, elementType: &Value{sszValueType: TypeBytes, sizeIsVariable: sCheck, valueSize: s, sizeInBytes: s, parent: parent}}, nil
 		}
 
 		// []*Struct
-		elem, err := e.parseASTFieldType(name, tags, obj.Elt)
+		elem, err := e.parseASTFieldType(name, offset, parent, tags, obj.Elt)
 		if err != nil {
 			return nil, err
 		}
 		if size, ok := getTagsInt(tags, "ssz-size"); ok {
 			// fixed vector
-			v := &Value{sszValueType: TypeVector, sizeInBytes: size, elementType: elem}
+			v := &Value{sszValueType: TypeVector, sizeInBytes: size, elementType: elem, parent: parent}
 			if elem.isFixed() {
 				// set the total size
 				v.valueSize = size * elem.valueSize
@@ -760,7 +759,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		if !ok {
 			return nil, fmt.Errorf("slice '%s' expects either ssz-max or ssz-size", name)
 		}
-		v := &Value{sszValueType: TypeList, elementType: elem, sizeInBytes: maxSize, maxSize: maxSize}
+		v := &Value{sszValueType: TypeList, elementType: elem, sizeInBytes: maxSize, maxSize: maxSize, parent: parent}
 		return v, nil
 
 	case *ast.Ident:
@@ -768,18 +767,18 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		var v *Value
 		switch obj.Name {
 		case "uint64":
-			v = &Value{sszValueType: TypeUint, valueSize: 8}
+			v = &Value{sszValueType: TypeUint, valueSize: 8, parent: parent, fieldOffset: offset}
 		case "uint32":
-			v = &Value{sszValueType: TypeUint, valueSize: 4}
+			v = &Value{sszValueType: TypeUint, valueSize: 4, parent: parent, fieldOffset: offset}
 		case "uint16":
-			v = &Value{sszValueType: TypeUint, valueSize: 2}
+			v = &Value{sszValueType: TypeUint, valueSize: 2, parent: parent, fieldOffset: offset}
 		case "uint8":
-			v = &Value{sszValueType: TypeUint, valueSize: 1}
+			v = &Value{sszValueType: TypeUint, valueSize: 1, parent: parent, fieldOffset: offset}
 		case "bool":
-			v = &Value{sszValueType: TypeBool, valueSize: 1}
+			v = &Value{sszValueType: TypeBool, valueSize: 1, parent: parent, fieldOffset: offset}
 		default:
 			// try to resolve as an alias
-			vv, err := e.encodeItem(obj.Name, tags)
+			vv, err := e.encodeItem(obj.Name, offset, parent, tags)
 			if err != nil {
 				return nil, fmt.Errorf("type %s not found", obj.Name)
 			}
@@ -797,17 +796,17 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			if !ok {
 				return nil, fmt.Errorf("bitlist %s does not have ssz-max tag", name)
 			}
-			return &Value{sszValueType: TypeBitList, maxSize: maxSize, sizeInBytes: maxSize}, nil
+			return &Value{sszValueType: TypeBitList, maxSize: maxSize, sizeInBytes: maxSize, parent: parent, fieldOffset: offset}, nil
 		} else if strings.HasPrefix(sel, "Bitvector") {
 			// go-bitfield/Bitvector, fixed bytes
 			size, ok := getTagsInt(tags, "ssz-size")
 			if !ok {
 				return nil, fmt.Errorf("bitvector %s does not have ssz-size tag", name)
 			}
-			return &Value{sszValueType: TypeBytes, sizeInBytes: size, valueSize: size}, nil
+			return &Value{sszValueType: TypeBytes, sizeInBytes: size, valueSize: size, parent: parent, fieldOffset: offset}, nil
 		}
 		// external reference
-		vv, err := e.encodeItem(sel, tags)
+		vv, err := e.encodeItem(sel, offset, parent, tags)
 		if err != nil {
 			return nil, err
 		}
