@@ -73,10 +73,10 @@ func (v *Value) copy() *Value {
 	return vv
 }
 
-func (v *Value) isFixed() bool {
+func (v *Value) IsFixed() bool {
 	switch v.sszValueType {
 	case TypeVector:
-		return v.elementType.isFixed()
+		return v.elementType.IsFixed()
 
 	case TypeBytes:
 		if v.sizeInBytes != 0 {
@@ -192,4 +192,16 @@ func (v *ValueRenderer) Fields() []*Value {
 
 func (v *ValueRenderer) HashTreeRoot() string {
 	return v.Value.HashTreeRoot()
+}
+
+func (v *ValueRenderer) ValueSize() uint64 {
+	return v.Value.valueSize
+}
+
+func (v *Value) FieldName() string {
+	return v.fieldName
+}
+
+func (v *Value) FieldOffset() int {
+	return v.fieldOffset
 }

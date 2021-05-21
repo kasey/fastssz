@@ -5,7 +5,7 @@ import (
 )
 
 // hashTreeRoot creates a function that SSZ hashes the structs,
-func (e *env) hashTreeRoot(v *ValueRenderer) string {
+func (v *ValueRenderer) RenderHTR() string {
 	tmpl := `// HashTreeRoot ssz hashes the {{.StructName}} object
 	func ({{.ReceiverName}} *{{.StructName}}) HashTreeRoot() ([32]byte, error) {
 		return ssz.HashWithDefaultHasher({{.ReceiverName}})
@@ -140,7 +140,7 @@ func (v *Value) HashTreeRoot() string {
 		return v.hashRoots(false, v.elementType.sszValueType)
 
 	case TypeList:
-		if v.elementType.isFixed() {
+		if v.elementType.IsFixed() {
 			if v.elementType.sszValueType == TypeUint || v.elementType.sszValueType == TypeBytes {
 				// return hashBasicSlice(v)
 				return v.hashRoots(true, v.elementType.sszValueType)
@@ -170,23 +170,3 @@ func (v *Value) HashTreeRoot() string {
 		panic(fmt.Errorf("hash not implemented for type %s", v.sszValueType.String()))
 	}
 }
-
-/*
-func (v *ValueRenderer) HashTreeRootContainer() string {
-	out := []string{}
-	for indx, i := range v.fields {
-		str := fmt.Sprintf("// Field (%d) '%s'\n%s\n", indx, i.fieldName, i.hashTreeRoot())
-		out = append(out, str)
-	}
-
-	tmpl := `indx := hh.Index()
-
-	{{.fields}}
-
-	hh.Merkleize(indx)`
-
-	return execTmpl(tmpl, map[string]interface{}{
-		"fields": strings.Join(out, "\n"),
-	})
-}
-*/

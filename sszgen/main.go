@@ -298,17 +298,18 @@ func (e *env) print(first bool, order []string) (string, bool, error) {
 			uniqImports[ref] = struct{}{}
 		}
 
-		if obj.isFixed() && obj.isBasicType() {
+		if obj.IsFixed() && obj.isBasicType() {
 			// we have an alias of a basic type (uint, bool). These objects
 			// will be encoded/decoded inside their parent container and do not
 			// require the sszgen functions.
 			continue
 		}
+		renderer := &ValueRenderer{Value: *obj}
 		objs = append(objs, &Obj{
-			HashTreeRoot: e.hashTreeRoot(&ValueRenderer{Value: *obj}),
-			Marshal:      e.marshal(name, obj),
-			Unmarshal:    e.unmarshal(name, obj),
-			Size:         e.size(name, obj),
+			HashTreeRoot: renderer.RenderHTR(),
+			Marshal:      renderer.MarshalSSZ(),
+			Unmarshal:    renderer.UnmarshalSSZ(),
+			Size:         renderer.SizeSSZ(),
 		})
 	}
 	if len(objs) == 0 {
@@ -316,8 +317,6 @@ func (e *env) print(first bool, order []string) (string, bool, error) {
 		return "", false, nil
 	}
 	data["objs"] = objs
-
-	// insert any required imports
 
 	importsStr := []string{}
 	for importName := range uniqImports {
@@ -331,15 +330,6 @@ func (e *env) print(first bool, order []string) (string, bool, error) {
 	}
 
 	return execTmpl(tmpl, data), true, nil
-}
-
-// All the generated functions use the '::' string to represent the pointer receiver
-// of the struct method (i.e 'm' in func(m *Method) XX()) for convenience.
-// This function replaces the '::' string with a valid one that corresponds
-// to the first letter of the method in lower case.
-func appendObjSignature(str string, v *Value) string {
-	sig := strings.ToLower(string(v.fieldName[0]))
-	return strings.Replace(str, "::", sig, -1)
 }
 
 type astStruct struct {
@@ -647,7 +637,7 @@ func (e *env) parseASTStructType(name string, offset int, parent *Value, typ *as
 
 	// get the total size of the container
 	for _, f := range v.fields {
-		if f.isFixed() {
+		if f.IsFixed() {
 			v.valueSize += f.valueSize
 		} else {
 			v.valueSize += bytesPerLengthOffset
@@ -748,7 +738,7 @@ func (e *env) parseASTFieldType(name string, offset int, parent *Value, tags str
 		if size, ok := getTagsInt(tags, "ssz-size"); ok {
 			// fixed vector
 			v := &Value{sszValueType: TypeVector, sizeInBytes: size, elementType: elem, parent: parent, fieldOffset: offset}
-			if elem.isFixed() {
+			if elem.IsFixed() {
 				// set the total size
 				v.valueSize = size * elem.valueSize
 			}

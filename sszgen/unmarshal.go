@@ -7,20 +7,19 @@ import (
 )
 
 // unmarshal creates a function that decodes the structs with the input byte in SSZ format.
-func (e *env) unmarshal(name string, v *Value) string {
+func (v *ValueRenderer) UnmarshalSSZ() string {
 	tmpl := `// UnmarshalSSZ ssz unmarshals the {{.name}} object
-	func (:: *{{.name}}) UnmarshalSSZ(buf []byte) error {
+	func ({{.ReceiverName}} *{{.name}}) UnmarshalSSZ(buf []byte) error {
 		var err error
 		{{.unmarshal}}
 		return err
 	}`
 
-	str := execTmpl(tmpl, map[string]interface{}{
-		"name":      name,
+	return execTmpl(tmpl, map[string]interface{}{
+		"name":      v.StructName(),
 		"unmarshal": v.umarshalContainer(true, "buf"),
+		"ReceiverName": v.ReceiverName(),
 	})
-
-	return appendObjSignature(str, v)
 }
 
 func (v *Value) unmarshal(dst string) string {
@@ -31,7 +30,7 @@ func (v *Value) unmarshal(dst string) string {
 
 	case TypeBytes:
 		if v.sizeIsVariable {
-			return fmt.Sprintf("copy(::.%s[:], %s)", v.fieldName, dst)
+			return fmt.Sprintf("copy(%s.%s[:], %s)", v.ReceiverName(), v.fieldName, dst)
 		}
 		validate := ""
 		if v.sizeInBytes == 0 {
@@ -39,44 +38,46 @@ func (v *Value) unmarshal(dst string) string {
 			validate = fmt.Sprintf("if len(%s) > %d { return ssz.ErrBytesLength }\n", dst, v.maxSize)
 		}
 		// both fixed and dynamic are decoded equally
-		tmpl := `{{.validate}}if cap(::.{{.fieldName}}) == 0 {
-			::.{{.fieldName}} = make([]byte, 0, len({{.dst}}))
+		tmpl := `{{.validate}}if cap({{.ReceiverName}}.{{.fieldName}}) == 0 {
+			{{.ReceiverName}}.{{.fieldName}} = make([]byte, 0, len({{.dst}}))
 		}
-		::.{{.fieldName}} = append(::.{{.fieldName}}, {{.dst}}...)`
+		{{.ReceiverName}}.{{.fieldName}} = append({{.ReceiverName}}.{{.fieldName}}, {{.dst}}...)`
 		return execTmpl(tmpl, map[string]interface{}{
 			"validate": validate,
 			"fieldName":     v.fieldName,
 			"dst":      dst,
 			"size":     v.maxSize,
+			"ReceiverName": v.ReceiverName(),
 		})
 
 	case TypeUint:
 		if v.referencePackageAlias != "" {
 			// alias, we need to cast the value
-			return fmt.Sprintf("::.%s = %s.%s(ssz.Unmarshall%s(%s))", v.fieldName, v.referencePackageAlias, v.structName, v.uintVToName(), dst)
+			return fmt.Sprintf("%s.%s = %s.%s(ssz.Unmarshall%s(%s))", v.ReceiverName(), v.fieldName, v.referencePackageAlias, v.structName, v.uintVToName(), dst)
 		}
 		if v.structName != "" {
 			// alias to a type on the same package
-			return fmt.Sprintf("::.%s = %s(ssz.Unmarshall%s(%s))", v.fieldName, v.structName, v.uintVToName(), dst)
+			return fmt.Sprintf("%s.%s = %s(ssz.Unmarshall%s(%s))", v.ReceiverName(), v.fieldName, v.structName, v.uintVToName(), dst)
 		}
-		return fmt.Sprintf("::.%s = ssz.Unmarshall%s(%s)", v.fieldName, v.uintVToName(), dst)
+		return fmt.Sprintf("%s.%s = ssz.Unmarshall%s(%s)", v.ReceiverName(), v.fieldName, v.uintVToName(), dst)
 
 	case TypeBitList:
 		tmpl := `if err = ssz.ValidateBitlist({{.dst}}, {{.size}}); err != nil {
 			return err
 		}
-		if cap(::.{{.fieldName}}) == 0 {
-			::.{{.fieldName}} = make([]byte, 0, len({{.dst}}))
+		if cap({{.ReceiverName}}.{{.fieldName}}) == 0 {
+			{{.ReceiverName}}.{{.fieldName}} = make([]byte, 0, len({{.dst}}))
 		}
-		::.{{.fieldName}} = append(::.{{.fieldName}}, {{.dst}}...)`
+		{{.ReceiverName}}.{{.fieldName}} = append({{.ReceiverName}}.{{.fieldName}}, {{.dst}}...)`
 		return execTmpl(tmpl, map[string]interface{}{
 			"fieldName": v.fieldName,
 			"dst":  dst,
 			"size": v.maxSize,
+			"ReceiverName": v.ReceiverName(),
 		})
 
 	case TypeVector:
-		if v.elementType.isFixed() {
+		if v.elementType.IsFixed() {
 			dst = fmt.Sprintf("%s[ii*%d: (ii+1)*%d]", dst, v.elementType.valueSize, v.elementType.valueSize)
 
 			tmpl := `{{.create}}
@@ -95,7 +96,7 @@ func (v *Value) unmarshal(dst string) string {
 		return v.unmarshalList()
 
 	case TypeBool:
-		return fmt.Sprintf("::.%s = ssz.UnmarshalBool(%s)", v.fieldName, dst)
+		return fmt.Sprintf("%s.%s = ssz.UnmarshalBool(%s)", v.ReceiverName(), v.fieldName, dst)
 
 	default:
 		panic(fmt.Errorf("unmarshal not implemented for type %d", v.sszValueType))
@@ -110,7 +111,7 @@ func (v *Value) unmarshalList() string {
 	// In order to use createSlice with a dynamic list we need to set v.sizeInBytes to 0
 	v.sizeInBytes = 0
 
-	if v.elementType.isFixed() {
+	if v.elementType.IsFixed() {
 		dst := fmt.Sprintf("buf[ii*%d: (ii+1)*%d]", v.elementType.valueSize, v.elementType.valueSize)
 
 		tmpl := `num, err := ssz.DivideInt2(len(buf), {{.size}}, {{.max}})
@@ -161,10 +162,10 @@ func (v *Value) unmarshalList() string {
 
 func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 	if !start {
-		tmpl := `{{ if .check }}if ::.{{.fieldName}} == nil {
-			::.{{.fieldName}} = new({{.structName}})
+		tmpl := `{{ if .check }}if {{.ReceiverName}}.{{.fieldName}} == nil {
+			{{.ReceiverName}}.{{.fieldName}} = new({{.structName}})
 		}
-		{{ end }}if err = ::.{{.fieldName}}.UnmarshalSSZ({{.dst}}); err != nil {
+		{{ end }}if err = {{.ReceiverName}}.{{.fieldName}}.UnmarshalSSZ({{.dst}}); err != nil {
 			return err
 		}`
 		check := true
@@ -176,6 +177,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 			"structName":   v.objRef(),
 			"dst":   dst,
 			"check": check,
+			"ReceiverName": v.ReceiverName(),
 		})
 	}
 
@@ -183,7 +185,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 	offsetsMatch := map[string]string{}
 
 	for indx, i := range v.fields {
-		if !i.isFixed() {
+		if !i.IsFixed() {
 			name := "o" + strconv.Itoa(indx)
 			if len(offsets) != 0 {
 				offsetsMatch[name] = offsets[len(offsets)-1]
@@ -197,7 +199,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 	// 2. Struct is dynamic. The size of the input buffer must be higher than the fixed part of the struct.
 
 	var cmp string
-	if v.isFixed() {
+	if v.IsFixed() {
 		cmp = "!="
 	} else {
 		cmp = "<"
@@ -230,7 +232,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 
 		// How much it increases on every item
 		var incr uint64
-		if i.isFixed() {
+		if i.IsFixed() {
 			incr = i.valueSize
 		} else {
 			incr = 4
@@ -240,7 +242,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 		o0 += incr
 
 		var res string
-		if i.isFixed() {
+		if i.IsFixed() {
 			res = fmt.Sprintf("// Field (%d) '%s'\n%s\n\n", indx, i.fieldName, i.unmarshal(dst))
 
 		} else {
@@ -278,7 +280,7 @@ func (v *Value) umarshalContainer(start bool, dst string) (str string) {
 
 	c := 0
 	for indx, i := range v.fields {
-		if !i.isFixed() {
+		if !i.IsFixed() {
 
 			from := offsets[c]
 			var to string
@@ -327,11 +329,11 @@ func (v *Value) createSlice() string {
 	switch v.elementType.sszValueType {
 	case TypeUint:
 		// []int uses the Extend functions in the fastssz package
-		return fmt.Sprintf("::.%s = ssz.Extend%s(::.%s, %s)", v.fieldName, v.elementType.uintVToName(), v.fieldName, size)
+		return fmt.Sprintf("%s.%s = ssz.Extend%s(%s.%s, %s)", v.ReceiverName(), v.fieldName, v.elementType.uintVToName(), v.ReceiverName(), v.fieldName, size)
 
 	case TypeContainer:
 		// []*(referencePackageAlias.)Struct{}
-		return fmt.Sprintf("::.%s = make([]*%s, %s)", v.fieldName, v.elementType.objRef(), size)
+		return fmt.Sprintf("%s.%s = make([]*%s, %s)", v.ReceiverName(), v.fieldName, v.elementType.objRef(), size)
 
 	case TypeBytes:
 		// [][]byte
@@ -339,9 +341,9 @@ func (v *Value) createSlice() string {
 			return ""
 		}
 		if v.elementType.sizeIsVariable {
-			return fmt.Sprintf("::.%s = make([][%d]byte, %s)", v.fieldName, v.elementType.sizeInBytes, size)
+			return fmt.Sprintf("%s.%s = make([][%d]byte, %s)", v.ReceiverName(), v.fieldName, v.elementType.sizeInBytes, size)
 		}
-		return fmt.Sprintf("::.%s = make([][]byte, %s)", v.fieldName, size)
+		return fmt.Sprintf("%s.%s = make([][]byte, %s)", v.ReceiverName(), v.fieldName, size)
 
 	default:
 		panic(fmt.Sprintf("create not implemented for type %s", v.elementType.sszValueType.String()))
