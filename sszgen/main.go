@@ -704,7 +704,7 @@ func (e *env) parseASTFieldType(name string, offset int, parent *Value, tags str
 		if isByte(obj.Elt) {
 			if fixedlen := getObjLen(obj); fixedlen != 0 {
 				// array of fixed size
-				return &Value{sszValueType: TypeBytes, sizeIsVariable: true, sizeInBytes: fixedlen, valueSize: fixedlen, parent: parent}, nil
+				return &Value{sszValueType: TypeBytes, sizeIsVariable: true, sizeInBytes: fixedlen, valueSize: fixedlen, parent: parent, fieldOffset: offset}, nil
 			}
 			// []byte
 			if tag, ok := getTags(tags, "ssz"); ok && tag == "bitlist" {
@@ -713,19 +713,19 @@ func (e *env) parseASTFieldType(name string, offset int, parent *Value, tags str
 				if !ok {
 					return nil, fmt.Errorf("bitfield requires a 'ssz-max' field")
 				}
-				return &Value{sszValueType: TypeBitList, maxSize: max, sizeInBytes: max, parent: parent}, nil
+				return &Value{sszValueType: TypeBitList, maxSize: max, sizeInBytes: max, parent: parent, fieldOffset: offset}, nil
 			}
 			size, ok := getTagsInt(tags, "ssz-size")
 			if ok {
 				// fixed bytes
-				return &Value{sszValueType: TypeBytes, sizeInBytes: size, valueSize: size, parent: parent}, nil
+				return &Value{sszValueType: TypeBytes, sizeInBytes: size, valueSize: size, parent: parent, fieldOffset: offset}, nil
 			}
 			max, ok := getTagsInt(tags, "ssz-max")
 			if !ok {
 				return nil, fmt.Errorf("[]byte expects either ssz-max or ssz-size")
 			}
 			// dynamic bytes
-			return &Value{sszValueType: TypeBytes, maxSize: max, parent: parent}, nil
+			return &Value{sszValueType: TypeBytes, maxSize: max, parent: parent, fieldOffset: offset}, nil
 		}
 		if isArray(obj.Elt) && isByte(obj.Elt.(*ast.ArrayType).Elt) {
 			f, fCheck, s, sCheck, t, err := getRootSizes(obj, tags)
@@ -734,10 +734,10 @@ func (e *env) parseASTFieldType(name string, offset int, parent *Value, tags str
 			}
 			if t == TypeVector {
 				// vector
-				return &Value{sszValueType: TypeVector, sizeIsVariable: fCheck, valueSize: f * s, sizeInBytes: f, elementType: &Value{sszValueType: TypeBytes, sizeIsVariable: sCheck, valueSize: s, sizeInBytes: s, parent: parent}}, nil
+				return &Value{sszValueType: TypeVector, sizeIsVariable: fCheck, valueSize: f * s, sizeInBytes: f, elementType: &Value{sszValueType: TypeBytes, sizeIsVariable: sCheck, valueSize: s, sizeInBytes: s, parent: parent, fieldOffset: offset}}, nil
 			}
 			// list
-			return &Value{sszValueType: TypeList, sizeInBytes: f, elementType: &Value{sszValueType: TypeBytes, sizeIsVariable: sCheck, valueSize: s, sizeInBytes: s, parent: parent}}, nil
+			return &Value{sszValueType: TypeList, sizeInBytes: f, elementType: &Value{sszValueType: TypeBytes, sizeIsVariable: sCheck, valueSize: s, sizeInBytes: s, parent: parent, fieldOffset: offset}}, nil
 		}
 
 		// []*Struct
@@ -747,7 +747,7 @@ func (e *env) parseASTFieldType(name string, offset int, parent *Value, tags str
 		}
 		if size, ok := getTagsInt(tags, "ssz-size"); ok {
 			// fixed vector
-			v := &Value{sszValueType: TypeVector, sizeInBytes: size, elementType: elem, parent: parent}
+			v := &Value{sszValueType: TypeVector, sizeInBytes: size, elementType: elem, parent: parent, fieldOffset: offset}
 			if elem.isFixed() {
 				// set the total size
 				v.valueSize = size * elem.valueSize
@@ -759,7 +759,7 @@ func (e *env) parseASTFieldType(name string, offset int, parent *Value, tags str
 		if !ok {
 			return nil, fmt.Errorf("slice '%s' expects either ssz-max or ssz-size", name)
 		}
-		v := &Value{sszValueType: TypeList, elementType: elem, sizeInBytes: maxSize, maxSize: maxSize, parent: parent}
+		v := &Value{sszValueType: TypeList, elementType: elem, sizeInBytes: maxSize, maxSize: maxSize, parent: parent, fieldOffset: offset}
 		return v, nil
 
 	case *ast.Ident:
@@ -980,4 +980,3 @@ func execTmpl(tpl string, input interface{}) string {
 	}
 	return buf.String()
 }
-
