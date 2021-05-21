@@ -13,7 +13,7 @@ import (
 // that field to the size. It is up to other methods like marshal to fail on that scenario.
 func (e *env) size(name string, v *Value) string {
 	tmpl := `// SizeSSZ returns the ssz encoded size in bytes for the {{.name}} object
-	func (:: *{{.name}}) SizeSSZ() (size int) {
+	func ({{.ReceiverName}} *{{.name}}) SizeSSZ() (size int) {
 		size = {{.fixed}}{{if .dynamic}}
 
 		{{.dynamic}}
@@ -25,16 +25,17 @@ func (e *env) size(name string, v *Value) string {
 		"name":    name,
 		"fixed":   v.valueSize,
 		"dynamic": v.sizeContainer("size", true),
+		"ReceiverName": v.ReceiverName(),
 	})
 	return appendObjSignature(str, v)
 }
 
 func (v *Value) sizeContainer(name string, start bool) string {
 	if !start {
-		tmpl := `{{if .check}} if ::.{{.fieldName}} == nil {
-			::.{{.fieldName}} = new({{.structName}})
+		tmpl := `{{if .check}} if {{.ReceiverName}}.{{.fieldName}} == nil {
+			{{.ReceiverName}}.{{.fieldName}} = new({{.structName}})
 		}
-		{{end}} {{ .dst }} += ::.{{.fieldName}}.SizeSSZ()`
+		{{end}} {{ .dst }} += {{.ReceiverName}}.{{.fieldName}}.SizeSSZ()`
 
 		check := true
 		if v.isListElem() {
@@ -48,6 +49,7 @@ func (v *Value) sizeContainer(name string, start bool) string {
 			"dst":   name,
 			"structName":   v.objRef(),
 			"check": check,
+			"ReceiverName": v.ReceiverName(),
 		})
 	}
 	out := []string{}
@@ -104,17 +106,17 @@ func (v *Value) size(name string) string {
 		fallthrough
 
 	case TypeBytes:
-		return fmt.Sprintf(name+" += len(::.%s)", v.fieldName)
+		return fmt.Sprintf(name+" += len(%s.%s)", v.ReceiverName(), v.fieldName)
 
 	case TypeList:
 		fallthrough
 
 	case TypeVector:
 		if v.elementType.isFixed() {
-			return fmt.Sprintf("%s += len(::.%s) * %d", name, v.fieldName, v.elementType.valueSize)
+			return fmt.Sprintf("%s += len(%s.%s) * %d", name, v.ReceiverName(), v.fieldName, v.elementType.valueSize)
 		}
 		v.elementType.fieldName = v.fieldName + "[ii]"
-		tmpl := `for ii := 0; ii < len(::.{{.fieldName}}); ii++ {
+		tmpl := `for ii := 0; ii < len({{.ReceiverName}}.{{.fieldName}}); ii++ {
 			{{.size}} += 4
 			{{.dynamic}}
 		}`
@@ -122,6 +124,7 @@ func (v *Value) size(name string) string {
 			"fieldName":    v.fieldName,
 			"size":    name,
 			"dynamic": v.elementType.size(name),
+			"ReceiverName": v.ReceiverName(),
 		})
 
 	default:
