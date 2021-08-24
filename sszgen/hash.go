@@ -1,13 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
-	"text/template"
 )
-
-const chunkSize = 32
 
 // hashTreeRoot creates a function that SSZ hashes the structs,
 func (e *env) hashTreeRoot(name string, v *Value) string {
@@ -30,75 +26,30 @@ func (e *env) hashTreeRoot(name string, v *Value) string {
 	return appendObjSignature(str, v)
 }
 
-func nextChunkAlignment(size int) int {
-	if size % chunkSize == 0 {
-		return size
-	}
-	floor := (size / chunkSize) * chunkSize
-	return floor + chunkSize
-}
-
-func (v *Value) hashRootsInner(elem Type) string {
-	var padDeclare, padCopy string
+func (v *Value) hashRoots(isList bool, elem Type) string {
 	subName := "i"
 	if v.e.c {
 		subName += "[:]"
 	}
-	innerTmpl, _ := template.New("hashRootInnerTemplate").Parse(`{{- .PadDeclare -}}
-		if len(i) != {{.ElemSize}} {
+	inner := ""
+	if !v.e.c && elem == TypeBytes {
+		inner = `if len(i) != %d {
 			err = ssz.ErrBytesLength
 			return
 		}
-		{{- .PadCopy }}
-		hh.{{.AppendFn}}({{.SubName}})`)
-	if !v.e.c && elem == TypeBytes {
-		// if the size of the byte slice does not align with the htr chunk size
-		// we need to zero pad to the next chunk boundary
-		paddedSize := nextChunkAlignment(int(v.e.s))
-		if paddedSize != int(v.e.s) {
-			subName = "padded"
-			padDeclare = fmt.Sprintf("padded = make([]byte, %d)\n", paddedSize)
-			padCopy = fmt.Sprintf("\ncopy(padded[0:%d], i[0:%d])", v.e.s, v.e.s)
-		}
+		`
+		inner = fmt.Sprintf(inner, v.e.s)
 	}
+
 	var appendFn string
-	if elem == TypeBytes {
-		// [][]byte
-		appendFn = "Append"
-	} else {
-		// []uint64
-		appendFn = "AppendUint64"
-	}
-	buf := bytes.NewBuffer(nil)
-	err := innerTmpl.Execute(buf, struct{
-		PadDeclare string
-		ElemSize uint64
-		PadCopy string
-		AppendFn string
-		SubName string
-	}{
-		PadDeclare: padDeclare,
-		ElemSize: v.e.s,
-		PadCopy: padCopy,
-		AppendFn: appendFn,
-		SubName: subName,
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	return string(buf.Bytes())
-}
-
-func (v *Value) hashRoots(isList bool, elem Type) string {
-	inner := v.hashRootsInner(elem)
-
 	var elemSize uint64
 	if elem == TypeBytes {
 		// [][]byte
+		appendFn = "Append"
 		elemSize = 32
 	} else {
 		// []uint64
+		appendFn = "AppendUint64"
 		elemSize = 8
 	}
 
@@ -124,7 +75,7 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 	tmpl := `{
 		{{.outer}}subIndx := hh.Index()
 		for _, i := range ::.{{.name}} {
-			{{.inner}}
+			{{.inner}}hh.{{.appendFn}}({{.subName}})
 		}
 		{{.merkleize}}
 	}`
@@ -132,6 +83,8 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 		"outer":     v.validate(),
 		"inner":     inner,
 		"name":      v.name,
+		"subName":   subName,
+		"appendFn":  appendFn,
 		"merkleize": merkleize,
 	})
 }
