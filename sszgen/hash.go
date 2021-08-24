@@ -44,14 +44,12 @@ func (v *Value) hashRootsInner(elem Type) string {
 	if v.e.c {
 		subName += "[:]"
 	}
-	innerTmpl, _ := template.New("hashRootInnerTemplate").Parse(`{{- if .IsTypeBytes -}}
+	innerTmpl, _ := template.New("hashRootInnerTemplate").Parse(`{{- .PadDeclare -}}
 		if len(i) != {{.ElemSize}} {
 			err = ssz.ErrBytesLength
 			return
 		}
-		{{ end -}}
-		{{- .PadDeclare -}}
-		{{- .PadCopy -}}
+		{{- .PadCopy }}
 		hh.{{.AppendFn}}({{.SubName}})`)
 	if !v.e.c && elem == TypeBytes {
 		// if the size of the byte slice does not align with the htr chunk size
@@ -59,8 +57,8 @@ func (v *Value) hashRootsInner(elem Type) string {
 		paddedSize := nextChunkAlignment(int(v.e.s))
 		if paddedSize != int(v.e.s) {
 			subName = "padded"
-			padDeclare = fmt.Sprintf("padded = make([]byte, %d)", paddedSize)
-			padCopy = fmt.Sprintf("\ncopy(padded[0:%d], i[0:%d])\n", v.e.s, v.e.s)
+			padDeclare = fmt.Sprintf("padded = make([]byte, %d)\n", paddedSize)
+			padCopy = fmt.Sprintf("\ncopy(padded[0:%d], i[0:%d])", v.e.s, v.e.s)
 		}
 	}
 	var appendFn string
@@ -78,14 +76,12 @@ func (v *Value) hashRootsInner(elem Type) string {
 		PadCopy string
 		AppendFn string
 		SubName string
-		IsTypeBytes bool
 	}{
 		PadDeclare: padDeclare,
 		ElemSize: v.e.s,
 		PadCopy: padCopy,
 		AppendFn: appendFn,
 		SubName: subName,
-		IsTypeBytes: elem == TypeBytes,
 	})
 	if err != nil {
 		panic(err)
