@@ -994,6 +994,37 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		return v, nil
 
 	case *ast.Ident:
+		// This condition is a hack to check for protobuf oneof fields in prysm, which are used to implement ssz Unions.
+		// fastssz generally assumes that the ssz method set exists for any Container
+		// types found within a Container, so long as they aren't marked as "references"
+		// (which in fastssz lingo means they are an external library brought into scope w/ the -include flag).
+		// We are hand-writing unions for now, so we just need fastssz to trust that ssz methods exists on the
+		// oneof field, which we'll ensure by placing a separate hand-written method set in the package dir.
+		if obj.Obj != nil {
+			decl, ok := obj.Obj.Decl.(*ast.TypeSpec)
+			if ok {
+				switch iface := decl.Type.(type) {
+				case *ast.InterfaceType:
+					for _, method := range iface.Methods.List {
+						if len(method.Names) < 1 {
+							continue
+						}
+						mname := method.Names[0].Name
+						// protobuf indicates that a field is a oneof by declaring an interface type with a method
+						// named like `isTransaction_TransactionOneof`
+						if strings.HasPrefix(mname, "is") && strings.HasSuffix(mname, "Oneof") {
+							return &Value{
+								name: name[0:len(name)-5],
+								t:    TypeContainer,
+								o:    []*Value{},
+							}, nil
+						}
+					}
+				default:
+					fmt.Printf("%v", iface)
+				}
+			}
+		}
 		// basic type
 		var v *Value
 		switch obj.Name {
