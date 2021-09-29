@@ -284,6 +284,16 @@ func (h *Hasher) MerkleizeWithMixin(indx int, num, limit uint64) {
 	h.buf = append(h.buf[:indx], input...)
 }
 
+func (h *Hasher) MerkleizeMixInSelector(indx int, selector byte) {
+	input := h.buf[indx:]
+
+	// merkleize the input
+	input = h.merkleizeImpl(input[:0], input, 0)
+
+	input = h.doHash(input, input, []byte{selector})
+	h.buf = append(h.buf[:indx], input...)
+}
+
 // HashRoot creates the hash final hash root
 func (h *Hasher) HashRoot() (res [32]byte, err error) {
 	if len(h.buf) != 32 {
