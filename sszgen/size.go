@@ -63,7 +63,7 @@ func (v *Value) sizeContainer(name string, start bool) string {
 // during marshalling to figure out the size of the offset
 func (v *Value) size(name string) string {
 	if v.isFixed() {
-		if v.t == TypeContainer {
+		if v.t == TypeContainer || v.t == TypeUnion {
 			return v.sizeContainer(name, false)
 		}
 		if v.n == 1 {
@@ -73,7 +73,7 @@ func (v *Value) size(name string) string {
 	}
 
 	switch v.t {
-	case TypeContainer, TypeReference:
+	case TypeContainer, TypeReference, TypeUnion:
 		return v.sizeContainer(name, false)
 
 	case TypeBitList:

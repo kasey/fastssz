@@ -37,7 +37,7 @@ func (e *env) marshal(name string, v *Value) string {
 
 func (v *Value) marshal() string {
 	switch v.t {
-	case TypeContainer, TypeReference:
+	case TypeContainer, TypeReference, TypeUnion:
 		return v.marshalContainer(false)
 
 	case TypeBytes:

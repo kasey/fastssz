@@ -26,7 +26,7 @@ func (e *env) unmarshal(name string, v *Value) string {
 func (v *Value) unmarshal(dst string) string {
 	// we use dst as the input buffer where the SSZ data to decode the value is.
 	switch v.t {
-	case TypeContainer, TypeReference:
+	case TypeContainer, TypeReference, TypeUnion:
 		return v.umarshalContainer(false, dst)
 
 	case TypeBytes:
@@ -340,7 +340,7 @@ func (v *Value) createSlice() string {
 		// []int uses the Extend functions in the fastssz package
 		return fmt.Sprintf("::.%s = ssz.Extend%s(::.%s, %s)", v.name, uintVToName(v.e), v.name, size)
 
-	case TypeContainer:
+	case TypeContainer, TypeUnion:
 		// []*(ref.)Struct{}
 		return fmt.Sprintf("::.%s = make([]*%s, %s)", v.name, v.e.objRef(), size)
 

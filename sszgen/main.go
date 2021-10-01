@@ -239,6 +239,8 @@ const (
 	TypeContainer
 	// TypeReference is a SSZ reference
 	TypeReference
+	// TypeUnion is an ssz Union
+	TypeUnion
 )
 
 func (t Type) String() string {
@@ -886,6 +888,10 @@ func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, erro
 			v.c = true
 		}
 	}
+	if len(v.o) == 1 && v.o[0].t == TypeUnion {
+		v.t = TypeUnion
+		v.c = true // since a union can be multiple types, it is never fixed size
+	}
 	return v, nil
 }
 
@@ -1015,8 +1021,9 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 						if strings.HasPrefix(mname, "is") && strings.HasSuffix(mname, "Oneof") {
 							return &Value{
 								name: name[0:len(name)-5],
-								t:    TypeContainer,
+								t:    TypeUnion,
 								o:    []*Value{},
+								c: true,
 							}, nil
 						}
 					}
@@ -1244,7 +1251,7 @@ func (v *Value) isFixed() bool {
 		// dynamic bytes
 		return false
 
-	case TypeContainer:
+	case TypeContainer, TypeUnion:
 		return !v.c
 
 	// Dynamic types
