@@ -287,10 +287,13 @@ func (h *Hasher) MerkleizeWithMixin(indx int, num, limit uint64) {
 func (h *Hasher) MerkleizeMixInSelector(indx int, selector byte) {
 	input := h.buf[indx:]
 
-	// merkleize the input
+	// mix_in_selector(hash_tree_root(value.value), value.selector) if value is of union type, and value.value is not None
+	// mix_in_selector(Bytes32(), 0) if value is of union type, and value.value is None
+	selectorBytes := []byte{selector, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	input = h.merkleizeImpl(input[:0], input, 0)
+	selectorBytes[0] = selector
+	input = h.doHash(input, input, selectorBytes)
 
-	input = h.doHash(input, input, []byte{selector})
 	h.buf = append(h.buf[:indx], input...)
 }
 
